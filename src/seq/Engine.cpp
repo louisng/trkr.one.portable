@@ -30,6 +30,8 @@ static uint32_t lastTickUs = 0;    // when the previous tick was processed
 
 struct Active {
   bool used;
+  bool held;  // hold mode: no scheduled end
+  uint8_t track;
   uint8_t channel;
   uint8_t pitch;
   bool drum;
@@ -76,7 +78,17 @@ static void noteOffActive(Active& a) {
   a.used = false;
 }
 
-static void startNote(const Track& tr, const NoteEvent& e, uint32_t tick) {
+static void releaseTrackLocked(uint8_t t) {
+  for (auto& a : active)
+    if (a.used && a.track == t) noteOffActive(a);
+}
+
+void releaseTrack(uint8_t t) {
+  Lock l;
+  releaseTrackLocked(t);
+}
+
+static void startNote(uint8_t t, const Track& tr, const NoteEvent& e, uint32_t tick) {
   bool drum = tr.kind == TrackKind::Drum;
   // Retrigger: stop the same pitch on the same channel if it's still sounding.
   Active* slot = nullptr;
@@ -87,7 +99,7 @@ static void startNote(const Track& tr, const NoteEvent& e, uint32_t tick) {
   if (!slot) {  // all busy: cut the one ending soonest
     slot = &active[0];
     for (auto& a : active)
-      if (a.offTick < slot->offTick) slot = &a;
+      if (a.held || a.offTick < slot->offTick) slot = &a;
     noteOffActive(*slot);
   }
   midi::noteOn(tr.channel, e.pitch, e.vel);
@@ -97,33 +109,65 @@ static void startNote(const Track& tr, const NoteEvent& e, uint32_t tick) {
   } else {
     monitor::noteOn(e.pitch);
   }
-  *slot = {true, tr.channel, e.pitch, drum, tick + (e.len ? e.len : 1)};
+  const bool held = tr.hold && !drum;
+  *slot = {true, held, t, tr.channel, e.pitch, drum, tick + (e.len ? e.len : 1)};
 }
 
 static void processTick(uint32_t tick) {
   for (auto& a : active)
-    if (a.used && (int32_t)(tick - a.offTick) >= 0) noteOffActive(a);
+    if (a.used && !a.held && (int32_t)(tick - a.offTick) >= 0) noteOffActive(a);
 
   for (uint8_t t = 0; t < TRACKS; t++) {
     Track& tr = song.tracks[t];
     Pattern& p = tr.cur();
     const uint32_t P = (uint32_t)p.length * TICKS_PER_STEP;
     const uint32_t rel = tick % P;
+
+    // Collect what fires on this track now, so a chord in hold mode replaces
+    // the previous notes once instead of each note cutting the others.
+    NoteEvent* fire[8];
+    uint8_t nf = 0;
+    bool offHere = false;
     for (auto& e : p.notes) {
-      uint32_t fire = (uint32_t)(((int32_t)e.step * TICKS_PER_STEP + e.offset + (int32_t)P) % (int32_t)P);
-      if (fire != rel) continue;
+      uint32_t at = (uint32_t)(((int32_t)e.step * TICKS_PER_STEP + e.offset + (int32_t)P) % (int32_t)P);
+      if (at != rel) continue;
       if (e.flags & NF_SKIP_ONCE) {
         e.flags &= ~NF_SKIP_ONCE;
         continue;
       }
-      if (!tr.mute) startNote(tr, e, tick);
+      if (e.pitch == PITCH_OFF) offHere = true;
+      else if (nf < 8) fire[nf++] = &e;
     }
+    if (offHere || (nf && tr.hold)) releaseTrackLocked(t);
+    if (!tr.mute)
+      for (uint8_t i = 0; i < nf; i++) startNote(t, tr, *fire[i], tick);
   }
 
   // Metronome on each beat (accent on the bar).
   const uint32_t beat = TICKS_PER_STEP * 4;
   if (tick % beat == 0 && (settings.metronome == 2 || (settings.metronome == 1 && recording())))
     monitor::click(tick % (beat * 4) == 0);
+}
+
+// ── Tap tempo ────────────────────────────────────────────────────────────────
+static uint32_t taps[4];
+static uint8_t tapCount = 0;
+
+uint8_t tapTempo() {
+  uint32_t now = millis();
+  if (tapCount && now - taps[(tapCount - 1) % 4] > 2000) tapCount = 0;  // start a new run
+  taps[tapCount % 4] = now;
+  tapCount++;
+  uint8_t n = tapCount < 4 ? tapCount : 4;
+  if (n >= 2) {
+    uint32_t oldest = taps[(tapCount - n) % 4];
+    uint32_t avg = (now - oldest) / (n - 1);
+    if (avg > 0) {
+      uint32_t b = 60000UL / avg;
+      song.bpm = (uint16_t)(b < BPM_MIN ? BPM_MIN : b > BPM_MAX ? BPM_MAX : b);
+    }
+  }
+  return n;
 }
 
 static void clockTask(void*) {

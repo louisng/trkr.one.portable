@@ -10,7 +10,7 @@ USB MIDI sequencer for the Arduboy.
 
 ## Status: phase 2 (sequencer)
 
-- **Sequencer:** 8 tracks × 8 patterns, 1–64 steps per pattern, up to 4 notes per step.
+- **Sequencer:** 8 tracks × 8 patterns, 1–128 steps (8 bars) per pattern, up to 4 notes per step.
   Every note keeps its velocity, length and a fine timing offset (the tracker in phase 3
   shows and edits all of it). Tracks can have different lengths and loop independently.
 - **Step screen** for writing patterns note by note, **live recording** while playing
@@ -43,12 +43,13 @@ Row 4  ct op alt z  x  c  v  b  n  m  ,  .  /  space     piano white keys
 | `;` `.` `,` `/` | cursor up / down / left / right (no fn needed) |
 | `space` | play / stop (any screen) |
 | `enter` | arm / disarm recording (records while playing) |
-| `f` / `l` | Step screen: shorten / lengthen the note you just entered |
+| `f` / `l` | Step screen: note length for what you just entered (¼, ½, 1, 2, 3… steps); in the options panel, pattern length ± a bar |
 | `'` | Step screen: pattern & track options |
-| `del` | Step screen: clear the step under the cursor |
+| `del` | Step screen: clear the step under the cursor; on an empty step, insert **OFF** (stops held notes) |
 | `` ` `` tap | flip between the Live and Step screens |
 | `` ` `` hold | menu: `1` Live, `2` Step, `3` Setup, `4` Key test, `s` save song, `b` Bluetooth MIDI, `u` USB MIDI, `m` speaker, `p` top rows mode |
 | `fn` + `m` / `p` / `b` / `u` / `s` | speaker on/off · top rows piano ↔ drums+chords · Bluetooth MIDI · USB MIDI · save song |
+| `fn` + `,` / `/` · `;` / `.` · `t` | tempo −1 / +1 · +10 / −10 · tap tempo |
 
 **Upper piano (fn+p):** the top two rows become a second, higher piano octave in the
 classic tracker layout: `q w e r t y u i o p [ ] \` are white keys (C up to A) and
@@ -61,8 +62,12 @@ classic tracker layout: `q w e r t y u i o p [ ] \` are white keys (C up to A) a
     cursor moves to the next step. Press more keys while still holding the first to stack
     them on the same step. `f`/`l` change the length of what you just entered.
   - *Drum tracks:* a 12-lane grid; drum pads toggle hits at the cursor.
-  - `'` opens options: pattern (1–8), length (1–64 steps), MIDI channel, synth/drum type,
-    mute, tempo.
+  - `'` opens options: pattern (1–8), length (1–128 steps; `f`/`l` jump a bar), **Double it**
+    (doubles the length and copies the notes into the new half), **Notes end** (after their
+    length, or *hold* until the track's next note or an OFF step), MIDI channel, synth/drum
+    type, mute, tempo.
+  - Each track's pattern has its own length and loops on its own, so a 2-bar bass line runs
+    against a 1-bar drum loop in time.
 - **Live:** shows what you play. `;`/`.` pick the track your keys play into, `,`/`/` change velocity.
 - **Setup:** MIDI transports, speaker, velocity, tempo, key & scale, piano mode,
   metronome (off / when recording / always), record quantize.

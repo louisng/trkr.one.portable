@@ -24,9 +24,36 @@ using namespace seq;
 static constexpr int PAGE = 16;
 static constexpr int GRID_TOP = 40;
 
-enum Opt : uint8_t { OPT_PATTERN, OPT_LENGTH, OPT_CHANNEL, OPT_TYPE, OPT_MUTE, OPT_BPM, OPT_COUNT };
-static const char* const OPT_LABELS[OPT_COUNT] = {"Pattern", "Length", "MIDI channel",
-                                                  "Type", "Mute", "Tempo"};
+enum Opt : uint8_t {
+  OPT_PATTERN,
+  OPT_LENGTH,
+  OPT_DOUBLE,
+  OPT_HOLD,
+  OPT_CHANNEL,
+  OPT_TYPE,
+  OPT_MUTE,
+  OPT_BPM,
+  OPT_COUNT
+};
+static const char* const OPT_LABELS[OPT_COUNT] = {"Pattern", "Length",       "Double it",
+                                                  "Notes end", "MIDI channel", "Type",
+                                                  "Mute",    "Tempo"};
+
+// Note lengths f / l step through: 1/4, 1/2 step, then whole steps.
+static uint16_t nextLength(uint16_t len, bool longer, uint16_t maxLen) {
+  const uint16_t T = TICKS_PER_STEP;
+  uint16_t r;
+  if (longer) r = len < T / 4 ? T / 4 : len < T / 2 ? T / 2 : len < T ? T : (len / T + 1) * T;
+  else r = len > T ? ((len - 1) / T) * T : len > T / 2 ? T / 2 : T / 4;
+  return r > maxLen ? maxLen : r;
+}
+
+static void formatLength(uint16_t len, char* out, size_t n) {
+  const uint16_t T = TICKS_PER_STEP;
+  if (len < T) snprintf(out, n, "1/%d step", T / len);
+  else if (len % T == 0) snprintf(out, n, "%d step%s", len / T, len == T ? "" : "s");
+  else snprintf(out, n, "%.1f steps", (float)len / T);
+}
 
 class StepScreen : public Screen {
  public:
@@ -49,15 +76,30 @@ class StepScreen : public Screen {
       case layout::ACT_RIGHT: moveCursor(+1, p); break;
       case layout::ACT_UP: selectTrack((selectedTrack() + TRACKS - 1) % TRACKS); resetEntry(); break;
       case layout::ACT_DOWN: selectTrack((selectedTrack() + 1) % TRACKS); resetEntry(); break;
-      case layout::ACT_DELETE: clearStep(p, cursor % p.length); break;
+      case layout::ACT_DELETE: {
+        // Synth tracks: del on notes clears them; del on an empty step puts
+        // an OFF there (stops held notes); del on an OFF clears it.
+        uint8_t st = (uint8_t)(cursor % p.length);
+        if (tr.kind == TrackKind::Synth && notesAt(p, st) == 0) setStepOff(p, st);
+        else clearStep(p, st);
+        break;
+      }
       case layout::ACT_SHORTER:
       case layout::ACT_LONGER: {
         if (tr.kind != TrackKind::Synth) break;
-        int target = lastEntered >= 0 ? lastEntered : cursor % p.length;
-        int d = (a == layout::ACT_LONGER ? 1 : -1) * TICKS_PER_STEP;
-        adjustStepLength(p, (uint8_t)target, d);
+        // Applies to the step you just entered, else the step under the cursor.
+        // With no notes there it just sets the length for the next entries.
+        uint8_t target = (uint8_t)(lastEntered >= 0 ? lastEntered : cursor % p.length);
         NoteEvent ev[MAX_NOTES_PER_STEP];
-        if (notesAt(p, (uint8_t)target, ev)) entryLen = ev[0].len;  // next entries match
+        uint8_t n = notesAt(p, target, ev);
+        uint16_t cur = (n && ev[0].pitch != PITCH_OFF) ? ev[0].len : entryLen;
+        uint16_t len = nextLength(cur, a == layout::ACT_LONGER, (uint16_t)p.length * TICKS_PER_STEP);
+        if (n) setStepLength(p, target, len);
+        entryLen = len;  // next entries match
+        char msg[32], l[16];
+        formatLength(len, l, sizeof(l));
+        snprintf(msg, sizeof(msg), "Note length: %s", l);
+        toast(msg);
         break;
       }
       case layout::ACT_OPTIONS:
@@ -140,13 +182,15 @@ class StepScreen : public Screen {
       case layout::ACT_DOWN: panelSel = (panelSel + 1) % OPT_COUNT; return;
       case layout::ACT_LEFT: d = -1; break;
       case layout::ACT_RIGHT: d = +1; break;
+      case layout::ACT_SHORTER: d = -16; break;  // f / l: a bar at a time
+      case layout::ACT_LONGER: d = +16; break;
       case layout::ACT_OPTIONS:
       case layout::ACT_DELETE: panel = false; return;
       default: return;
     }
     switch (panelSel) {
       case OPT_PATTERN:
-        tr.pattern = (uint8_t)((tr.pattern + PATTERNS + d) % PATTERNS);
+        tr.pattern = (uint8_t)((tr.pattern + PATTERNS + (d > 0 ? 1 : -1)) % PATTERNS);
         resetEntry();
         break;
       case OPT_LENGTH: {
@@ -154,15 +198,27 @@ class StepScreen : public Screen {
         setPatternLength(tr.cur(), (uint8_t)(len < 1 ? 1 : len > MAX_STEPS ? MAX_STEPS : len));
         break;
       }
+      case OPT_DOUBLE:
+        toast(doublePattern(tr.cur()) ? "Pattern doubled" : "Too long to double (max 128)");
+        break;
+      case OPT_HOLD:
+        tr.hold = !tr.hold;
+        releaseTrack(selectedTrack());
+        break;
       case OPT_CHANNEL:
         player::releaseAll();
-        tr.channel = (uint8_t)((tr.channel - 1 + d + 16) % 16 + 1);
+        releaseTrack(selectedTrack());
+        tr.channel = (uint8_t)((tr.channel - 1 + (d > 0 ? 1 : -1) + 16) % 16 + 1);
         break;
       case OPT_TYPE:
         player::releaseAll();
+        releaseTrack(selectedTrack());
         tr.kind = tr.kind == TrackKind::Drum ? TrackKind::Synth : TrackKind::Drum;
         break;
-      case OPT_MUTE: tr.mute = !tr.mute; break;
+      case OPT_MUTE:
+        tr.mute = !tr.mute;
+        if (tr.mute) releaseTrack(selectedTrack());
+        break;
       case OPT_BPM: {
         int b = song.bpm + d;
         song.bpm = (uint16_t)(b < BPM_MIN ? BPM_MIN : b > BPM_MAX ? BPM_MAX : b);
@@ -173,7 +229,7 @@ class StepScreen : public Screen {
   }
 
   void drawPanel(M5Canvas& c, const Track& tr) {
-    const int x = 40, y = 28, w = 160, rowH = 12, h = 20 + OPT_COUNT * rowH + 12;
+    const int x = 20, y = 16, w = 200, rowH = 11, h = 18 + OPT_COUNT * rowH + 12;
     c.fillRoundRect(x, y, w, h, 5, col::BAR);
     c.drawRoundRect(x, y, w, h, 5, col::ACCENT);
     c.setFont(&fonts::Font0);
@@ -183,14 +239,21 @@ class StepScreen : public Screen {
     snprintf(buf, sizeof(buf), "TRACK %d %s", selectedTrack() + 1, tr.name);
     c.drawString(buf, x + 8, y + 6);
     for (uint8_t i = 0; i < OPT_COUNT; i++) {
-      int ry = y + 20 + i * rowH;
+      int ry = y + 18 + i * rowH;
       if (i == panelSel) c.fillRect(x + 3, ry - 2, w - 6, rowH, col::SELECT);
       c.setTextDatum(top_left);
       c.setTextColor(i == panelSel ? col::TEXT : col::DIM);
       c.drawString(OPT_LABELS[i], x + 8, ry);
       switch (i) {
         case OPT_PATTERN: snprintf(buf, sizeof(buf), "%d / %d", tr.pattern + 1, PATTERNS); break;
-        case OPT_LENGTH: snprintf(buf, sizeof(buf), "%d steps", tr.patterns[tr.pattern].length); break;
+        case OPT_LENGTH: {
+          int len = tr.patterns[tr.pattern].length;
+          if (len % 16 == 0) snprintf(buf, sizeof(buf), "%d (%d bar%s)", len, len / 16, len == 16 ? "" : "s");
+          else snprintf(buf, sizeof(buf), "%d steps", len);
+          break;
+        }
+        case OPT_DOUBLE: snprintf(buf, sizeof(buf), "press , or /"); break;
+        case OPT_HOLD: snprintf(buf, sizeof(buf), "%s", tr.hold ? "next note (hold)" : "after length"); break;
         case OPT_CHANNEL: snprintf(buf, sizeof(buf), "%d", tr.channel); break;
         case OPT_TYPE: snprintf(buf, sizeof(buf), "%s", tr.kind == TrackKind::Drum ? "drums" : "synth"); break;
         case OPT_MUTE: snprintf(buf, sizeof(buf), "%s", tr.mute ? "MUTED" : "off"); break;
@@ -202,7 +265,7 @@ class StepScreen : public Screen {
     }
     c.setTextDatum(top_left);
     c.setTextColor(col::DIM);
-    c.drawString("; . pick  , / change  ' close", x + 8, y + h - 11);
+    c.drawString("; . pick  , / change  f/l: bar  ' close", x + 8, y + h - 11);
   }
 
   // ── Header + track strip ───────────────────────────────────────────────────
@@ -211,8 +274,9 @@ class StepScreen : public Screen {
     c.setTextDatum(top_left);
     c.setTextColor(col::TEXT);
     char buf[48];
-    snprintf(buf, sizeof(buf), "%d %s  P%d  %dst  ch%d%s", selectedTrack() + 1, tr.name,
-             tr.pattern + 1, p.length, tr.channel, tr.mute ? "  MUTE" : "");
+    snprintf(buf, sizeof(buf), "%d %s  P%d  %dst  ch%d%s%s", selectedTrack() + 1, tr.name,
+             tr.pattern + 1, p.length, tr.channel, tr.hold ? "  HOLD" : "",
+             tr.mute ? "  MUTE" : "");
     c.drawString(buf, 4, 17);
     const int pages = (p.length + PAGE - 1) / PAGE;
     snprintf(buf, sizeof(buf), "pg %d/%d", cursor / PAGE + 1, pages);
@@ -254,7 +318,13 @@ class StepScreen : public Screen {
 
       NoteEvent ev[MAX_NOTES_PER_STEP];
       uint8_t n = notesAt(p, (uint8_t)s, ev);
-      if (n) {
+      if (isOffStep(p, (uint8_t)s)) {
+        c.setFont(&fonts::TomThumb);
+        c.setTextDatum(top_center);
+        c.setTextColor(col::DIM);
+        c.drawString("OFF", x + cw / 2, top + 6);
+        c.drawFastHLine(x + 2, top + 16, cw - 5, col::DIM);
+      } else if (n) {
         // Highest note's name + octave, and "+n" for chords.
         uint8_t hi = 0;
         for (uint8_t k = 1; k < n && k < MAX_NOTES_PER_STEP; k++)
@@ -287,7 +357,7 @@ class StepScreen : public Screen {
     c.setFont(&fonts::Font0);
     c.setTextDatum(top_left);
     c.setTextColor(col::DIM);
-    c.drawString("notes: enter  del: clear  f/l: length", 4, top + h + 4);
+    c.drawString("del: clear/OFF  f/l: note length", 4, top + h + 4);
     c.drawString("; . track  , / move  ' options", 4, top + h + 14);
   }
 

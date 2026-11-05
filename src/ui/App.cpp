@@ -41,7 +41,7 @@ static bool adv = false;
 
 // Shortcut keys, looked up by key cap so they follow the layout table.
 static int8_t idxDigit[4];
-static int8_t idxB = -1, idxU = -1, idxM = -1, idxP = -1, idxS = -1;
+static int8_t idxB = -1, idxU = -1, idxM = -1, idxP = -1, idxS = -1, idxT = -1;
 
 static int8_t findCap(const char* cap) {
   for (uint8_t r = 0; r < layout::ROWS; r++)
@@ -111,7 +111,33 @@ static void handleMenuKey(uint8_t idx) {
   else if (idx == idxS) saveSong();
 }
 
+static void changeTempo(int d) {
+  int b = seq::song.bpm + d;
+  seq::song.bpm = (uint16_t)(b < seq::BPM_MIN ? seq::BPM_MIN : b > seq::BPM_MAX ? seq::BPM_MAX : b);
+  char msg[20];
+  snprintf(msg, sizeof(msg), "Tempo %d", seq::song.bpm);
+  toast(msg);
+}
+
 static void handleFnKey(uint8_t idx) {
+  const layout::KeyDef& def = layout::keyAt(idx);
+  if (def.role == layout::Role::Action) {
+    switch (def.value) {
+      case layout::ACT_LEFT: changeTempo(-1); return;
+      case layout::ACT_RIGHT: changeTempo(+1); return;
+      case layout::ACT_UP: changeTempo(+10); return;
+      case layout::ACT_DOWN: changeTempo(-10); return;
+      default: break;
+    }
+  }
+  if (idx == idxT) {
+    uint8_t n = seq::tapTempo();
+    char msg[24];
+    if (n < 2) snprintf(msg, sizeof(msg), "Tap tempo: keep tapping");
+    else snprintf(msg, sizeof(msg), "Tempo %d (tap)", seq::song.bpm);
+    toast(msg);
+    return;
+  }
   if (idx == idxM) toggleSpeaker();
   else if (idx == idxP) toggleUpperPiano();
   else if (idx == idxB) toggleBle();
@@ -258,7 +284,7 @@ static void drawMenu() {
   snprintf(buf, sizeof(buf), "p Top rows: %s", settings.upperPiano ? "piano" : "drums+chords");
   canvas.drawString(buf, x + 8, y + 89);
   canvas.setTextColor(col::DIM);
-  canvas.drawString("fn + m/p/b/u/s does the same", x + 8, y + 101);
+  canvas.drawString("fn+m/p/b/u/s, fn+arrows/t = tempo", x + 8, y + 101);
 }
 
 static void drawToast() {
@@ -300,6 +326,7 @@ void begin() {
   idxM = findCap("m");
   idxP = findCap("p");
   idxS = findCap("s");
+  idxT = findCap("t");
   layout::setUpperPiano(settings.upperPiano);
   lastBle = midi::bleState();
   lastUsb = midi::usbState();

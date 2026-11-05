@@ -34,6 +34,14 @@ void selectTrack(uint8_t t);
 uint8_t liveSynthTrack();  // where piano/chord keys go: the selected track if it's a synth
 uint8_t liveDrumTrack();   // where drum pads go: the selected track if it's drums
 
+// Stop anything a track is still sounding (e.g. held notes when hold mode,
+// mute or the channel changes).
+void releaseTrack(uint8_t t);
+
+// Tap tempo: call on each tap; sets song.bpm after two or more taps.
+// Returns the number of taps in the current run.
+uint8_t tapTempo();
+
 // Current step of a track's pattern, or -1 when stopped.
 int trackStep(uint8_t t);
 

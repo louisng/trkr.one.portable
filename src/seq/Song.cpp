@@ -31,6 +31,7 @@ void songInit() {
     tr.kind = DEFAULTS[t].kind;
     tr.channel = DEFAULTS[t].channel;
     tr.mute = false;
+    tr.hold = false;
     tr.pattern = 0;
     for (auto& p : tr.patterns) {
       p.length = 16;
@@ -106,6 +107,33 @@ void adjustStepLength(Pattern& p, uint8_t step, int deltaTicks) {
   }
 }
 
+void setStepLength(Pattern& p, uint8_t step, uint16_t lenTicks) {
+  for (auto& e : p.notes)
+    if (e.step == step && e.pitch != PITCH_OFF) e.len = lenTicks ? lenTicks : 1;
+}
+
+bool doublePattern(Pattern& p) {
+  if ((int)p.length * 2 > MAX_STEPS) return false;
+  const uint8_t len = p.length;
+  const size_t n = p.notes.size();
+  for (size_t i = 0; i < n; i++) {
+    NoteEvent e = p.notes[i];
+    e.step += len;
+    e.flags = 0;
+    p.notes.push_back(e);
+  }
+  p.length = len * 2;
+  std::sort(p.notes.begin(), p.notes.end(), lessEv);
+  return true;
+}
+
+void setStepOff(Pattern& p, uint8_t step) {
+  clearStep(p, step);
+  if (step < p.length) addNote(p, NoteEvent{step, 0, PITCH_OFF, 0, 1, 0});
+}
+
+bool isOffStep(const Pattern& p, uint8_t step) { return hasNote(p, step, PITCH_OFF); }
+
 void setPatternLength(Pattern& p, uint8_t length) {
   if (length < 1) length = 1;
   if (length > MAX_STEPS) length = MAX_STEPS;
@@ -118,10 +146,10 @@ void setPatternLength(Pattern& p, uint8_t length) {
 // ── Persistence ──────────────────────────────────────────────────────────────
 // File layout (little endian):
 //   "CMSG" u8 version  u16 bpm
-//   per track: name[6] kind channel mute pattern
+//   per track: name[6] kind channel mute pattern [hold: v2+]
 //     per pattern: length u16 count, then count x {step offset pitch vel u16 len}
 static const char* SONG_PATH = "/song.cms";
-static constexpr uint8_t SONG_VERSION = 1;
+static constexpr uint8_t SONG_VERSION = 2;
 static bool fsReady = false;
 
 static bool ensureFs() {
@@ -142,6 +170,7 @@ bool songSave() {
     f.write(tr.channel);
     f.write((uint8_t)tr.mute);
     f.write(tr.pattern);
+    f.write((uint8_t)tr.hold);
     for (const auto& p : tr.patterns) {
       f.write(p.length);
       uint16_t count = (uint16_t)p.notes.size();
@@ -168,7 +197,8 @@ bool songLoad() {
   uint8_t ver = 0;
   uint16_t bpm = 0;
   bool ok = f.read((uint8_t*)magic, 4) == 4 && memcmp(magic, "CMSG", 4) == 0 &&
-            f.read(&ver, 1) == 1 && ver == SONG_VERSION && f.read((uint8_t*)&bpm, 2) == 2;
+            f.read(&ver, 1) == 1 && ver >= 1 && ver <= SONG_VERSION &&
+            f.read((uint8_t*)&bpm, 2) == 2;
   if (!ok) {
     f.close();
     return false;
@@ -183,6 +213,9 @@ bool songLoad() {
     tr.channel = (hdr[1] >= 1 && hdr[1] <= 16) ? hdr[1] : 1;
     tr.mute = hdr[2] != 0;
     tr.pattern = hdr[3] < PATTERNS ? hdr[3] : 0;
+    uint8_t hold = 0;
+    if (ver >= 2 && f.read(&hold, 1) != 1) break;
+    tr.hold = hold != 0;
     for (auto& p : tr.patterns) {
       uint8_t len = 16;
       uint16_t count = 0;
@@ -194,7 +227,7 @@ bool songLoad() {
         uint8_t rec[6];
         if (f.read(rec, 6) != 6) break;
         NoteEvent e{rec[0], (int8_t)rec[1], rec[2], rec[3], (uint16_t)(rec[4] | (rec[5] << 8)), 0};
-        if (e.step < p.length && e.pitch < 128) p.notes.push_back(e);
+        if (e.step < p.length && (e.pitch < 128 || e.pitch == PITCH_OFF)) p.notes.push_back(e);
       }
       std::sort(p.notes.begin(), p.notes.end(), lessEv);
     }
