@@ -64,6 +64,10 @@ void begin() {
     rtcCrashCount = 0;
   }
   Stage last = (Stage)(rtcStage < ST_COUNT ? rtcStage : ST_NONE);
+#ifdef BOOT_DEBUG
+  Serial.printf("[boot] last start stopped at step: %s, reset: %s\n", stageName(last),
+                resetReasonText());
+#endif
   if (isCrashReset(reason) && last != ST_NONE) {
     crashed = true;
     crashStage = last;
@@ -80,6 +84,10 @@ void begin() {
 
 void stage(Stage s) {
   rtcStage = s;
+#ifdef BOOT_DEBUG
+  Serial.printf("[boot] step: %s%s\n", stageName(s), skipped(s) ? " (skipped)" : "");
+  Serial.flush();
+#endif
   if (s == ST_RUNNING) return;
   auto& d = M5Cardputer.Display;
   d.setTextColor(skipped(s) ? TFT_ORANGE : TFT_DARKGREY, TFT_BLACK);

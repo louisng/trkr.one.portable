@@ -12,9 +12,29 @@
 
 using namespace bootguard;
 
+#ifdef BOOT_DEBUG
+#include <esp_system.h>
+#define DBG(...) Serial.printf(__VA_ARGS__)
+#else
+#define DBG(...)
+#endif
+
 void setup() {
+#ifdef BOOT_DEBUG
+  Serial.begin(115200);
+  uint32_t t0 = millis();
+  while (!Serial && millis() - t0 < 4000) delay(10);  // give the console time to attach
+  delay(300);
+  DBG("\n\n[boot] Cardputer MIDI debug build\n");
+  DBG("[boot] reset reason: %d\n", (int)esp_reset_reason());
+  DBG("[boot] free heap: %u\n", (unsigned)ESP.getFreeHeap());
+  DBG("[boot] M5Cardputer.begin...\n");
+#endif
   auto cfg = M5.config();
   M5Cardputer.begin(cfg, true);
+  DBG("[boot] M5Cardputer.begin done, board=%d (ADV=%d, Cardputer=%d)\n", (int)M5.getBoard(),
+      (int)m5::board_t::board_M5CardputerADV, (int)m5::board_t::board_M5Cardputer);
+  DBG("[boot] display %dx%d\n", (int)M5Cardputer.Display.width(), (int)M5Cardputer.Display.height());
   M5Cardputer.Display.setBrightness(120);
 
   // Each step is recorded so that if one crashes, the next start reports it
@@ -45,10 +65,19 @@ void setup() {
   ui::begin();
 
   stage(ST_RUNNING);
+  DBG("[boot] setup finished, free heap: %u\n", (unsigned)ESP.getFreeHeap());
 }
 
 void loop() {
   M5Cardputer.update();  // scans the keyboard
   ui::tick();            // key events -> notes / screens, redraw when needed
   midi::update();        // sends this pass's BLE MIDI packet
+#ifdef BOOT_DEBUG
+  static uint32_t lastBeat = 0;
+  if (millis() - lastBeat > 2000) {
+    lastBeat = millis();
+    DBG("[alive] %lus, keys held: %u, heap: %u\n", (unsigned long)(millis() / 1000),
+        (unsigned)M5Cardputer.Keyboard.keyList().size(), (unsigned)ESP.getFreeHeap());
+  }
+#endif
 }

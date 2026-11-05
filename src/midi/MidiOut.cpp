@@ -1,25 +1,38 @@
 #include "MidiOut.h"
 
 #include <Arduino.h>
-#include <USB.h>
-#include <USBMIDI.h>
-
 #include "BleMidi.h"
 
+// USB MIDI needs the TinyUSB device stack (ARDUINO_USB_MODE=0). The debug
+// build uses the chip's hardware USB serial instead, so it has no USB MIDI.
+#define HAS_USB_MIDI (ARDUINO_USB_MODE == 0)
+
+#if HAS_USB_MIDI
+#include <USB.h>
+#include <USBMIDI.h>
 // Must be a global so its interface is registered before the USB stack starts
 // (with ARDUINO_USB_CDC_ON_BOOT the core starts USB before setup()).
 static USBMIDI usbMidi("Cardputer MIDI");
+#endif
 
 namespace midi {
 
 static bool usbOn = false;
 static uint32_t sentCount = 0;
 
+#if HAS_USB_MIDI
 static bool usbMounted() { return (bool)USB; }
+#else
+static bool usbMounted() { return false; }
+#endif
 
 void beginUsb(bool enabled) {
+#if HAS_USB_MIDI
   usbMidi.begin();
   usbOn = enabled;
+#else
+  (void)enabled;
+#endif
 }
 
 void beginBle(bool enabled) {
@@ -39,7 +52,9 @@ void setBleEnabled(bool on) {
 
 void setUsbEnabled(bool on) {
   if (!on && usbOn && usbMounted()) {
+#if HAS_USB_MIDI
     for (uint8_t ch = 1; ch <= 16; ch++) usbMidi.controlChange(123, 0, ch);
+#endif
   }
   usbOn = on;
 }
@@ -60,11 +75,13 @@ LinkState usbState() {
 static void send3(uint8_t status, uint8_t d1, uint8_t d2) {
   sentCount++;
   blemidi::send(status, d1, d2);  // no-op unless enabled + connected
+#if HAS_USB_MIDI
   if (usbOn && usbMounted()) {
     uint8_t cin = status >> 4;
     midiEventPacket_t p = {cin, status, d1, d2};
     usbMidi.writePacket(&p);
   }
+#endif
 }
 
 void noteOn(uint8_t channel, uint8_t note, uint8_t velocity) {
