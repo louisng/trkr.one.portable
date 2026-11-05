@@ -103,10 +103,13 @@ void releaseTrack(uint8_t t) {
 static void startNote(uint8_t t, const Track& tr, const NoteEvent& e, uint32_t tick,
                       bool forceShort = false) {
   bool drum = tr.kind == TrackKind::Drum;
-  // Retrigger: stop the same pitch on the same channel if it's still sounding.
+  // What goes out over MIDI (drum tracks can send each drum on its own channel).
+  uint8_t ch, note;
+  midiOut(tr, e.pitch, &ch, &note);
+  // Retrigger: stop the same note on the same channel if it's still sounding.
   Active* slot = nullptr;
   for (auto& a : active) {
-    if (a.used && a.channel == tr.channel && a.pitch == e.pitch) noteOffActive(a);
+    if (a.used && a.channel == ch && a.pitch == note) noteOffActive(a);
     if (!a.used && !slot) slot = &a;
   }
   if (!slot) {  // all busy: cut the one ending soonest
@@ -115,15 +118,17 @@ static void startNote(uint8_t t, const Track& tr, const NoteEvent& e, uint32_t t
       if (a.held || a.offTick < slot->offTick) slot = &a;
     noteOffActive(*slot);
   }
-  midi::noteOn(tr.channel, e.pitch, e.vel);
+  midi::noteOn(ch, note, e.vel);
   if (drum) {
-    int pad = player::drumPadForNote(e.pitch);
-    if (pad >= 0) synth::drum(t, (uint8_t)pad, e.vel);
+    int lane = drumLaneOf(e.pitch);
+    if (lane >= 0) synth::drum(t, (uint8_t)lane, e.vel);
   } else {
     synth::noteOn(t, e.pitch, e.vel);
   }
   const bool held = tr.hold && !drum && !forceShort;
-  *slot = {true, held, t, tr.channel, e.pitch, drum, tick + (e.len ? e.len : 1)};
+  // Synth note-offs use the stored pitch; for drums (no synth note-off) we
+  // store the MIDI note, so the MIDI note-off always matches the note-on.
+  *slot = {true, held, t, ch, note, drum, tick + (e.len ? e.len : 1)};
 }
 
 // Ratchet repeats waiting for their tick.

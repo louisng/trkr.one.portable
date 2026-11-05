@@ -61,7 +61,7 @@ Row 4  ct op alt z  x  c  v  b  n  m  ,  .  /  space     piano white keys
 | `'` | Step screen: pattern & track options |
 | `del` | Step screen: clear the step under the cursor; on an empty step, insert **OFF** (stops held notes) |
 | `` ` `` tap | cycle Step → Tracker → Live |
-| `` ` `` hold | menu: `1` Live, `2` Step, `3` Tracker, `4` Scenes, `5` Arrange, `6` Songs, `7` Setup, `8` Key test, `9` Synth, `s` save song, `b` Bluetooth MIDI, `u` USB MIDI, `m` speaker, `p` top rows mode |
+| `` ` `` hold | menu: `1` Live, `2` Step, `3` Tracker, `4` Scenes, `5` Arrange, `6` Songs, `7` Setup, `8` Key test, `9` Synth, `0` Drum MIDI, `s` save song, `b` Bluetooth MIDI, `u` USB MIDI, `m` speaker, `p` top rows mode |
 | `fn` + `m` / `p` / `b` / `u` / `s` | speaker on/off · top rows piano ↔ drums+chords · Bluetooth MIDI · USB MIDI · save song (asks for a name the first time) |
 | `fn` + `,` / `/` · `;` / `.` · `t` | tempo −1 / +1 · +10 / −10 · tap tempo |
 
@@ -140,6 +140,19 @@ classic tracker layout: `q w e r t y u i o p [ ] \` are white keys (C up to A) a
   - *Drum tracks:* Sound, Volume, Tone (brightness), Decay (shorter / longer), Pitch
     (±12 semitones) for the whole kit.
   - Instruments are saved with the song. Older songs get sensible defaults per track.
+- **Drum MIDI:** what each drum sends over MIDI. Drum hits are stored per drum, so you
+  can change this any time without touching patterns.
+  - *Kit* (default): every drum on the track's channel, each on its own note (General MIDI:
+    kick 36, snare 38, ...). Right for drum machines and DAW drum racks.
+  - *A channel per drum*: each drum on its own channel, e.g. one M8 instrument per drum.
+    Default: kick ch 1, snare ch 2, ... cowbell ch 12, all on note 60 (C4).
+  - The quick switch is the **Drum MIDI** line in a drum track's `'` options (one press).
+    For more, open the Drum MIDI page (menu `0`, or **Each drum...** in the options):
+    switch mode, set the kit channel or the first drum's channel (the rest follow in
+    order), one-press **GM kit on ch 10** or **ch 1-12 on C4**, one note for all drums, or
+    each drum's channel (`,`/`/`) and note (`f`/`l`, `shift` = octave). Hitting a drum pad
+    jumps to its row.
+  - Saved with the song.
 - **Songs:** the saved songs, sorted by name, with the open one in yellow.
   `;`/`.` pick, `enter` loads, `s` saves the open song over the selected one, `del` deletes;
   each asks for a second press to confirm. `'` switches between the **FLASH** and

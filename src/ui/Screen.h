@@ -57,12 +57,14 @@ Screen* songsScreen();
 Screen* scenesScreen();
 Screen* arrangeScreen();
 Screen* synthScreen();
+Screen* drumMidiScreen();
 void songsStartSaveAs();  // call before switching to songsScreen()
 Screen* setupScreen();
 Screen* keyTestScreen();
 
 // Shared helpers (App.cpp)
 void toast(const char* msg);
+void goTo(Screen* s);  // switch screens from inside a screen / panel
 void markDirty();
 bool isAdv();
 

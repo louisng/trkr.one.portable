@@ -51,7 +51,7 @@ static midi::LinkState lastBle, lastUsb;
 static bool adv = false;
 
 // Shortcut keys, looked up by key cap so they follow the layout table.
-static int8_t idxDigit[9];
+static int8_t idxDigit[10];
 static int8_t idxB = -1, idxU = -1, idxM = -1, idxP = -1, idxS = -1, idxT = -1;
 
 static int8_t findCap(const char* cap) {
@@ -81,6 +81,8 @@ static void switchTo(Screen* s) {
   settingsSave();
   dirty = true;
 }
+
+void goTo(Screen* s) { switchTo(s); }
 
 static void toggleBle() {
   settings.bleMidi = !settings.bleMidi;
@@ -133,6 +135,7 @@ static void handleMenuKey(uint8_t idx) {
   else if (idx == idxDigit[6]) switchTo(setupScreen());
   else if (idx == idxDigit[7]) switchTo(keyTestScreen());
   else if (idx == idxDigit[8]) switchTo(synthScreen());
+  else if (idx == idxDigit[9]) switchTo(drumMidiScreen());
   else if (idx == idxB) toggleBle();
   else if (idx == idxU) toggleUsb();
   else if (idx == idxM) toggleSpeaker();
@@ -321,25 +324,26 @@ static void drawMenu() {
   canvas.drawString("MENU  (hold `, press a key)", x + 8, y + 6);
 
   // Screens, 3 per row.
-  static const char* const SCREENS[9] = {"1 Live",  "2 Step",  "3 Tracker", "4 Scenes", "5 Arrange",
-                                         "6 Songs", "7 Setup", "8 Keys",    "9 Synth"};
+  static const char* const SCREENS[10] = {"1 Live",  "2 Step",  "3 Tracker", "4 Scenes", "5 Arrange",
+                                          "6 Songs", "7 Setup", "8 Keys",    "9 Synth",  "0 Drum MIDI"};
   canvas.setTextColor(col::TEXT);
   for (int i = 0; i < 9; i++) canvas.drawString(SCREENS[i], x + 8 + (i % 3) * 68, y + 19 + (i / 3) * 10);
+  canvas.drawString(SCREENS[9], x + 8, y + 49);  // fourth row
 
   char buf[40];
   snprintf(buf, sizeof(buf), "s Save %s", seq::currentSongName()[0] ? seq::currentSongName() : "as...");
-  canvas.drawString(buf, x + 8, y + 52);
+  canvas.drawString(buf, x + 8, y + 61);
   snprintf(buf, sizeof(buf), "b BLE: %s", settings.bleMidi ? "ON" : "off");
-  canvas.drawString(buf, x + 8, y + 64);
+  canvas.drawString(buf, x + 8, y + 72);
   snprintf(buf, sizeof(buf), "u USB: %s", settings.usbMidi ? "ON" : "off");
-  canvas.drawString(buf, x + 110, y + 64);
+  canvas.drawString(buf, x + 110, y + 72);
   snprintf(buf, sizeof(buf), "m Sound: %s", settings.speaker ? "ON" : "off");
-  canvas.drawString(buf, x + 8, y + 75);
+  canvas.drawString(buf, x + 8, y + 82);
   snprintf(buf, sizeof(buf), "p Top: %s", settings.upperPiano ? "piano" : "drum+chd");
-  canvas.drawString(buf, x + 110, y + 75);
+  canvas.drawString(buf, x + 110, y + 82);
   canvas.setTextColor(col::DIM);
-  canvas.drawString("fn + m p b u s: same", x + 8, y + 90);
-  canvas.drawString("fn + arrows / t: tempo", x + 8, y + 100);
+  canvas.drawString("fn + m p b u s: same", x + 8, y + 94);
+  canvas.drawString("fn + arrows / t: tempo", x + 8, y + 103);
 }
 
 static void drawToast() {
@@ -376,6 +380,7 @@ void begin() {
     char cap[2] = {(char)('1' + i), 0};
     idxDigit[i] = findCap(cap);
   }
+  idxDigit[9] = findCap("0");
   idxB = findCap("b");
   idxU = findCap("u");
   idxM = findCap("m");

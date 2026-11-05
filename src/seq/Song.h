@@ -84,6 +84,27 @@ const char* presetName(uint8_t preset);
 void applyPreset(Instrument& in, uint8_t preset);
 void defaultInstrument(Instrument& in, uint8_t track, bool drum);
 
+// ── Drum MIDI routing ────────────────────────────────────────────────────────
+// Inside patterns, drum hits are stored by their lane's General MIDI note
+// (kick 36, snare 38, ...). What actually goes out over MIDI depends on the
+// track's drum routing:
+//   kit:   every lane on the track's channel, each lane on kitNote[lane]
+//   lanes: every lane on its own channel laneCh[lane], playing laneNote[lane]
+//          (for gear like the M8 where each instrument has its own channel)
+static constexpr uint8_t DRUM_LANES = 12;
+extern const uint8_t DRUM_LANE_ID[DRUM_LANES];  // GM note that identifies each lane
+enum DrumMode : uint8_t { DRUM_KIT, DRUM_LANES_MODE };
+int drumLaneOf(uint8_t pitch);                  // -1 if not a lane note
+
+struct DrumRouting {
+  uint8_t mode;                  // DrumMode
+  uint8_t kitNote[DRUM_LANES];
+  uint8_t laneCh[DRUM_LANES];    // 1-16
+  uint8_t laneNote[DRUM_LANES];
+};
+void drumRoutingGmKit(DrumRouting& r);            // kit mode, standard GM notes
+void drumRoutingPerLane(DrumRouting& r, uint8_t firstCh = 1, uint8_t note = 60);
+
 struct Track {
   char name[6];
   TrackKind kind;
@@ -92,6 +113,7 @@ struct Track {
   bool hold;        // notes ring until the track's next note / OFF, ignoring length
   uint8_t pattern;  // pattern currently playing / being edited
   Instrument inst;  // built-in synth sound
+  DrumRouting drums;  // how drum hits go out over MIDI (drum tracks)
   Pattern patterns[PATTERNS];
 
   Pattern& cur() { return patterns[pattern]; }
@@ -146,6 +168,9 @@ bool doublePattern(Pattern& p);
 // Put a note-off on a step (replacing its notes).
 void setStepOff(Pattern& p, uint8_t step);
 bool isOffStep(const Pattern& p, uint8_t step);
+
+// MIDI channel + note a hit on this track goes out as.
+void midiOut(const Track& tr, uint8_t pitch, uint8_t* ch, uint8_t* note);
 
 // Length in steps of a scene: its longest non-silent pattern (16 if all silent).
 uint16_t sceneSteps(uint8_t scene);

@@ -16,10 +16,12 @@ namespace player {
 using layout::Role;
 
 struct Held {
-  uint8_t channel;  // 0 = nothing held
+  uint8_t channel;  // MIDI channel it went out on; 0 = nothing held
   uint8_t track;
   uint8_t count;
-  uint8_t notes[theory::MAX_CHORD_NOTES];
+  uint8_t notes[theory::MAX_CHORD_NOTES];  // as stored in the song (drums: lane id)
+  bool drum;
+  uint8_t drumOut;  // drums: the MIDI note actually sent (see the track's drum routing)
 };
 
 static Held held[layout::KEY_COUNT];
@@ -133,8 +135,10 @@ static void press(uint8_t k, const layout::KeyDef& def) {
     }
     case Role::Drum: {
       uint8_t pad = def.value % 12;
-      h = {seq::song.tracks[drumTrack].channel, drumTrack, 1, {DRUM_NOTES[pad]}};
-      startNote(h.track, h.channel, DRUM_NOTES[pad], true, pad);
+      uint8_t ch, note;
+      seq::midiOut(seq::song.tracks[drumTrack], DRUM_NOTES[pad], &ch, &note);
+      h = {ch, drumTrack, 1, {DRUM_NOTES[pad]}, true, note};
+      startNote(h.track, h.channel, note, true, pad);
       snprintf(last, sizeof(last), "%s", DRUM_NAMES[pad]);
       break;
     }
@@ -146,8 +150,11 @@ static void press(uint8_t k, const layout::KeyDef& def) {
 static void release(uint8_t k, const layout::KeyDef& def) {
   Held& h = held[k];
   if (!h.channel) return;
-  bool drum = def.role == Role::Drum;
-  for (uint8_t i = 0; i < h.count; i++) stopNote(h.track, h.channel, h.notes[i], drum);
+  (void)def;
+  if (h.drum) stopNote(h.track, h.channel, h.drumOut, true);
+  else
+    for (uint8_t i = 0; i < h.count; i++) stopNote(h.track, h.channel, h.notes[i], false);
+  h.drum = false;
   h.channel = 0;
   h.count = 0;
 }

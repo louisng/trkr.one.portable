@@ -54,6 +54,51 @@ void defaultInstrument(Instrument& in, uint8_t track, bool drum) {
   applyPreset(in, BY_TRACK[track % TRACKS]);
 }
 
+// ── Drum MIDI routing ────────────────────────────────────────────────────────
+const uint8_t DRUM_LANE_ID[DRUM_LANES] = {36, 38, 37, 39, 42, 46, 41, 45, 48, 49, 51, 56};
+
+int drumLaneOf(uint8_t pitch) {
+  for (uint8_t i = 0; i < DRUM_LANES; i++)
+    if (DRUM_LANE_ID[i] == pitch) return i;
+  return -1;
+}
+
+void drumRoutingGmKit(DrumRouting& r) {
+  r.mode = DRUM_KIT;
+  memcpy(r.kitNote, DRUM_LANE_ID, DRUM_LANES);
+  // Keep the per-lane setup intact so switching back and forth loses nothing.
+  bool unset = true;
+  for (auto c : r.laneCh) unset &= c == 0;
+  if (unset) {
+    for (uint8_t i = 0; i < DRUM_LANES; i++) {
+      r.laneCh[i] = (uint8_t)(i % 16 + 1);
+      r.laneNote[i] = 60;
+    }
+  }
+}
+
+void drumRoutingPerLane(DrumRouting& r, uint8_t firstCh, uint8_t note) {
+  r.mode = DRUM_LANES_MODE;
+  for (uint8_t i = 0; i < DRUM_LANES; i++) {
+    r.laneCh[i] = (uint8_t)((firstCh - 1 + i) % 16 + 1);
+    r.laneNote[i] = note;
+  }
+}
+
+void midiOut(const Track& tr, uint8_t pitch, uint8_t* ch, uint8_t* note) {
+  *ch = tr.channel;
+  *note = pitch;
+  if (tr.kind != TrackKind::Drum) return;
+  int lane = drumLaneOf(pitch);
+  if (lane < 0) return;
+  if (tr.drums.mode == DRUM_LANES_MODE) {
+    *ch = tr.drums.laneCh[lane];
+    *note = tr.drums.laneNote[lane];
+  } else {
+    *note = tr.drums.kitNote[lane];
+  }
+}
+
 void songInit() {
   song.bpm = 120;
   for (auto& sc : song.scenes)
@@ -69,6 +114,8 @@ void songInit() {
     tr.mute = false;
     tr.hold = false;
     defaultInstrument(tr.inst, t, tr.kind == TrackKind::Drum);
+    memset(&tr.drums, 0, sizeof(tr.drums));
+    drumRoutingGmKit(tr.drums);
     tr.pattern = 0;
     for (auto& p : tr.patterns) {
       p.length = 16;
@@ -270,7 +317,8 @@ void setPatternLength(Pattern& p, uint8_t length) {
 //                  [v3+: u16 fxCount, then fxCount x {step cmd val}]
 //   [v4+: scenes SCENES x TRACKS bytes, u8 arrangeCount, arrange bytes, u8 songMode]
 //   [v5+: per track, sizeof(Instrument) bytes]
-static constexpr uint8_t SONG_VERSION = 5;
+//   [v6+: per track, sizeof(DrumRouting) bytes]
+static constexpr uint8_t SONG_VERSION = 6;
 static char currentName[SONG_NAME_MAX + 1] = "";
 static Storage currentStore = Storage::Flash;
 
@@ -358,6 +406,8 @@ static bool writeSong(File& f) {
   f.write((uint8_t)song.songMode);
   static_assert(sizeof(Instrument) == 12, "song file stores Instrument as 12 bytes");
   for (const auto& tr : song.tracks) f.write((const uint8_t*)&tr.inst, sizeof(Instrument));
+  static_assert(sizeof(DrumRouting) == 37, "song file stores DrumRouting as 37 bytes");
+  for (const auto& tr : song.tracks) f.write((const uint8_t*)&tr.drums, sizeof(DrumRouting));
   return f.getWriteError() == 0;
 }
 
@@ -429,6 +479,17 @@ static bool readSong(File& f) {
     for (auto& tr : song.tracks) {
       if (f.read((uint8_t*)&tr.inst, sizeof(Instrument)) != sizeof(Instrument)) return false;
       if (tr.inst.wave >= WAVE_COUNT) tr.inst.wave = WAVE_SAW;
+    }
+  }
+  if (ver >= 6) {
+    for (auto& tr : song.tracks) {
+      if (f.read((uint8_t*)&tr.drums, sizeof(DrumRouting)) != sizeof(DrumRouting)) return false;
+      if (tr.drums.mode > DRUM_LANES_MODE) tr.drums.mode = DRUM_KIT;
+      for (uint8_t i = 0; i < DRUM_LANES; i++) {
+        if (tr.drums.laneCh[i] < 1 || tr.drums.laneCh[i] > 16) tr.drums.laneCh[i] = (uint8_t)(i % 16 + 1);
+        tr.drums.kitNote[i] &= 0x7F;
+        tr.drums.laneNote[i] &= 0x7F;
+      }
     }
   }
   return true;

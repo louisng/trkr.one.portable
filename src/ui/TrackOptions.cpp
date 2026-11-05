@@ -108,14 +108,30 @@ enum Opt : uint8_t {
   OPT_TYPE,
   OPT_MUTE,
   OPT_BPM,
+  OPT_DRUM_MIDI,   // drum tracks: kit on one channel / a channel per drum
+  OPT_DRUM_PAGE,   // drum tracks: open the per-drum page
   OPT_COUNT
 };
 static const char* const LABELS[OPT_COUNT] = {"Pattern",   "Length",       "Double it",
                                               "Notes end", "MIDI channel", "Type",
-                                              "Mute",      "Tempo"};
+                                              "Mute",      "Tempo",        "Drum MIDI",
+                                              "Each drum..."};
 
 static bool isOpenFlag = false;
-static uint8_t sel = 0;
+static uint8_t sel = 0;  // index into the visible item list
+
+// Items shown for this track (drum tracks swap "Notes end" for drum MIDI routing).
+static uint8_t items(const Track& tr, Opt* out) {
+  static const Opt SYNTH[] = {OPT_PATTERN, OPT_LENGTH, OPT_DOUBLE,  OPT_HOLD,
+                              OPT_CHANNEL, OPT_TYPE,   OPT_MUTE,    OPT_BPM};
+  static const Opt DRUM[] = {OPT_PATTERN,   OPT_LENGTH,    OPT_DOUBLE, OPT_DRUM_MIDI,
+                             OPT_DRUM_PAGE, OPT_CHANNEL,   OPT_TYPE,   OPT_MUTE, OPT_BPM};
+  const bool drum = tr.kind == TrackKind::Drum;
+  const Opt* src = drum ? DRUM : SYNTH;
+  const uint8_t n = drum ? sizeof(DRUM) / sizeof(DRUM[0]) : sizeof(SYNTH) / sizeof(SYNTH[0]);
+  for (uint8_t i = 0; i < n; i++) out[i] = src[i];
+  return n;
+}
 
 void open() {
   isOpenFlag = true;
@@ -127,10 +143,13 @@ bool isOpen() { return isOpenFlag; }
 bool onAction(uint8_t a) {
   const uint8_t t = selectedTrack();
   Track& tr = song.tracks[t];
+  Opt list[OPT_COUNT];
+  const uint8_t n = items(tr, list);
+  if (sel >= n) sel = 0;
   int d = 0;
   switch (a) {
-    case layout::ACT_UP: sel = (sel + OPT_COUNT - 1) % OPT_COUNT; return false;
-    case layout::ACT_DOWN: sel = (sel + 1) % OPT_COUNT; return false;
+    case layout::ACT_UP: sel = (sel + n - 1) % n; return false;
+    case layout::ACT_DOWN: sel = (sel + 1) % n; return false;
     case layout::ACT_LEFT: d = -1; break;
     case layout::ACT_RIGHT: d = +1; break;
     case layout::ACT_SHORTER: d = -16; break;  // f / l: a bar at a time
@@ -140,7 +159,7 @@ bool onAction(uint8_t a) {
     default: return false;
   }
   const int dir = d > 0 ? 1 : -1;
-  switch (sel) {
+  switch (list[sel]) {
     case OPT_PATTERN:
       tr.pattern = (uint8_t)((tr.pattern + PATTERNS + dir) % PATTERNS);
       return true;
@@ -176,6 +195,17 @@ bool onAction(uint8_t a) {
       tr.mute = !tr.mute;
       if (tr.mute) releaseTrack(t);
       break;
+    case OPT_DRUM_MIDI:
+      player::releaseAll();
+      releaseTrack(t);
+      tr.drums.mode = tr.drums.mode == DRUM_KIT ? DRUM_LANES_MODE : DRUM_KIT;
+      toast(tr.drums.mode == DRUM_KIT ? "Drums: one channel, a note per drum"
+                                      : "Drums: each drum on its own channel");
+      break;
+    case OPT_DRUM_PAGE:
+      close();
+      goTo(drumMidiScreen());
+      break;
     case OPT_BPM: {
       int b = song.bpm + d;
       song.bpm = (uint16_t)(b < BPM_MIN ? BPM_MIN : b > BPM_MAX ? BPM_MAX : b);
@@ -188,7 +218,10 @@ bool onAction(uint8_t a) {
 
 void draw(M5Canvas& c) {
   const Track& tr = song.tracks[selectedTrack()];
-  const int x = 20, y = 16, w = 200, rowH = 11, h = 18 + OPT_COUNT * rowH + 12;
+  Opt list[OPT_COUNT];
+  const uint8_t n = items(tr, list);
+  if (sel >= n) sel = 0;
+  const int x = 20, y = 15, w = 200, rowH = 10, h = 18 + n * rowH + 12;
   c.fillRoundRect(x, y, w, h, 5, col::BAR);
   c.drawRoundRect(x, y, w, h, 5, col::ACCENT);
   c.setFont(&fonts::Font0);
@@ -197,13 +230,14 @@ void draw(M5Canvas& c) {
   char buf[24];
   snprintf(buf, sizeof(buf), "TRACK %d %s", selectedTrack() + 1, tr.name);
   c.drawString(buf, x + 8, y + 6);
-  for (uint8_t i = 0; i < OPT_COUNT; i++) {
+  for (uint8_t i = 0; i < n; i++) {
+    const Opt o = list[i];
     int ry = y + 18 + i * rowH;
-    if (i == sel) c.fillRect(x + 3, ry - 2, w - 6, rowH, col::SELECT);
+    if (i == sel) c.fillRect(x + 3, ry - 1, w - 6, rowH, col::SELECT);
     c.setTextDatum(top_left);
     c.setTextColor(i == sel ? col::TEXT : col::DIM);
-    c.drawString(LABELS[i], x + 8, ry);
-    switch (i) {
+    c.drawString(LABELS[o], x + 8, ry);
+    switch (o) {
       case OPT_PATTERN: snprintf(buf, sizeof(buf), "%d / %d", tr.pattern + 1, PATTERNS); break;
       case OPT_LENGTH: {
         int len = tr.patterns[tr.pattern].length;
@@ -213,10 +247,19 @@ void draw(M5Canvas& c) {
       }
       case OPT_DOUBLE: snprintf(buf, sizeof(buf), "press , or /"); break;
       case OPT_HOLD: snprintf(buf, sizeof(buf), "%s", tr.hold ? "next note (hold)" : "after length"); break;
-      case OPT_CHANNEL: snprintf(buf, sizeof(buf), "%d", tr.channel); break;
+      case OPT_CHANNEL:
+        if (tr.kind == TrackKind::Drum && tr.drums.mode == DRUM_LANES_MODE) snprintf(buf, sizeof(buf), "per drum");
+        else snprintf(buf, sizeof(buf), "%d", tr.channel);
+        break;
       case OPT_TYPE: snprintf(buf, sizeof(buf), "%s", tr.kind == TrackKind::Drum ? "drums" : "synth"); break;
       case OPT_MUTE: snprintf(buf, sizeof(buf), "%s", tr.mute ? "MUTED" : "off"); break;
       case OPT_BPM: snprintf(buf, sizeof(buf), "%d bpm", song.bpm); break;
+      case OPT_DRUM_MIDI:
+        if (tr.drums.mode == DRUM_KIT) snprintf(buf, sizeof(buf), "kit on ch %d", tr.channel);
+        else snprintf(buf, sizeof(buf), "ch per drum");
+        break;
+      case OPT_DRUM_PAGE: snprintf(buf, sizeof(buf), "open >"); break;
+      default: buf[0] = 0;
     }
     c.setTextDatum(top_right);
     c.setTextColor(i == sel ? col::HELD : col::TEXT);
