@@ -15,6 +15,7 @@ class KeyTestScreen : public Screen {
  public:
   const char* title() const override { return "KEY TEST"; }
   bool musicKeys() const override { return false; }
+  bool spaceIsPlay() const override { return false; }
   void onEnter() override {
     maxHeld = 0;
     events = 0;

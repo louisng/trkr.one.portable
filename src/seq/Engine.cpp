@@ -28,6 +28,18 @@ static uint32_t nextTick = 0;      // next tick to process
 static uint32_t nextTickUs = 0;    // when it is due
 static uint32_t lastTickUs = 0;    // when the previous tick was processed
 
+// Where each track's pattern counts from. In pattern mode that's the start
+// of playback; in song mode it's the start of the current scene, so every
+// scene begins with all its patterns at step 1.
+static uint32_t origin = 0;
+static bool songActive = false;      // song mode is running the arrangement
+static uint8_t songPos = 0;          // index into song.arrange
+static uint8_t songStartPos = 0;     // where play() starts in song mode
+static uint32_t sceneStart = 0, sceneLen = 0;
+static bool silent[TRACKS];          // track is silent in the current scene
+
+static uint32_t baseTick() { return songActive ? sceneStart : origin; }
+
 struct Active {
   bool used;
   bool held;  // hold mode: no scheduled end
@@ -143,6 +155,23 @@ static void sendStepFx(uint8_t t, const Track& tr, uint8_t cmd, uint8_t val) {
   (void)t;
 }
 
+static void enterScene(uint32_t tick) {
+  if (song.arrange.empty()) song.arrange.assign(1, 0);
+  if (songPos >= song.arrange.size()) songPos = 0;
+  const Scene& sc = song.scenes[song.arrange[songPos] % SCENES];
+  for (uint8_t t = 0; t < TRACKS; t++) {
+    Track& tr = song.tracks[t];
+    uint8_t pt = sc.pattern[t];
+    bool nowSilent = pt >= PATTERNS;
+    if (nowSilent || pt != tr.pattern || !songActive) releaseTrackLocked(t);
+    silent[t] = nowSilent;
+    if (!nowSilent) tr.pattern = pt;
+  }
+  sceneStart = tick;
+  sceneLen = (uint32_t)sceneSteps(song.arrange[songPos]) * TICKS_PER_STEP;
+  songActive = true;
+}
+
 static void processTick(uint32_t tick) {
   for (auto& a : active)
     if (a.used && !a.held && (int32_t)(tick - a.offTick) >= 0) noteOffActive(a);
@@ -151,14 +180,28 @@ static void processTick(uint32_t tick) {
     if (q.used && (int32_t)(tick - q.tick) >= 0) {
       q.used = false;
       const Track& tr = song.tracks[q.track];
-      if (!tr.mute) startNote(q.track, tr, q.e, tick, true);
+      if (!tr.mute && !silent[q.track]) startNote(q.track, tr, q.e, tick, true);
     }
+
+  // Song mode: start, follow and stop the arrangement.
+  if (song.songMode && !songActive) {
+    songPos = songStartPos < song.arrange.size() ? songStartPos : 0;
+    enterScene(tick);
+  } else if (!song.songMode && songActive) {
+    songActive = false;
+    origin = sceneStart;  // keep tracks where they are
+    for (auto& s : silent) s = false;
+  } else if (songActive && tick - sceneStart >= sceneLen) {
+    songPos = (uint8_t)((songPos + 1) % song.arrange.size());
+    enterScene(tick);
+  }
 
   for (uint8_t t = 0; t < TRACKS; t++) {
     Track& tr = song.tracks[t];
     Pattern& p = tr.cur();
     const uint32_t P = (uint32_t)p.length * TICKS_PER_STEP;
-    const uint32_t rel = tick % P;
+    const uint32_t rel = (tick - baseTick()) % P;
+    if (silent[t]) continue;
 
     // Collect what fires on this track now, so a chord in hold mode replaces
     // the previous notes once instead of each note cutting the others.
@@ -276,13 +319,33 @@ void play() {
   nextTick = 0;
   nextTickUs = micros();
   lastTickUs = nextTickUs;
+  origin = 0;
+  songActive = false;  // (re)enters the arrangement on the first tick if song mode is on
+  for (auto& s : silent) s = false;
   isPlaying = true;
+}
+
+void setSongStart(uint8_t pos) { songStartPos = pos; }
+int songPosition() { return (isPlaying && songActive) ? songPos : -1; }
+
+void applyScene(uint8_t scene) {
+  Lock l;
+  if (scene >= SCENES) return;
+  for (uint8_t t = 0; t < TRACKS; t++) {
+    uint8_t pt = song.scenes[scene].pattern[t];
+    if (pt < PATTERNS && pt != song.tracks[t].pattern) {
+      releaseTrackLocked(t);
+      song.tracks[t].pattern = pt;
+    }
+  }
 }
 
 void stop() {
   Lock l;
   if (!isPlaying) return;
   isPlaying = false;
+  songActive = false;
+  for (auto& sl : silent) sl = false;
   for (auto& a : active)
     if (a.used) noteOffActive(a);
   for (auto& r : recHeld) r.used = false;
@@ -299,7 +362,7 @@ int trackStep(uint8_t t) {
   if (!isPlaying || nextTick == 0 || t >= TRACKS) return -1;
   const Pattern& p = song.tracks[t].patterns[song.tracks[t].pattern];
   uint32_t P = (uint32_t)p.length * TICKS_PER_STEP;
-  return (int)(((nextTick - 1) % P) / TICKS_PER_STEP);
+  return (int)(((nextTick - 1 - baseTick()) % P) / TICKS_PER_STEP);
 }
 
 // ── Live recording ───────────────────────────────────────────────────────────
@@ -319,7 +382,7 @@ void recordPress(uint8_t key, uint8_t track, const uint8_t* pitches, uint8_t cou
   const int P = (int)p.length * TICKS_PER_STEP;
   const float pos = nowTick();
   const int posTick = (int)lroundf(pos);
-  const int rel = posTick % P;
+  const int rel = (int)(((uint32_t)posTick - baseTick()) % (uint32_t)P);
 
   int step = (int)lroundf((float)rel / TICKS_PER_STEP);
   int offset = rel - step * TICKS_PER_STEP;

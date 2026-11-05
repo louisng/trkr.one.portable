@@ -24,6 +24,10 @@ static const TrackDefault DEFAULTS[TRACKS] = {
 
 void songInit() {
   song.bpm = 120;
+  for (auto& sc : song.scenes)
+    for (auto& pt : sc.pattern) pt = 0;
+  song.arrange.assign(1, 0);
+  song.songMode = false;
   for (uint8_t t = 0; t < TRACKS; t++) {
     Track& tr = song.tracks[t];
     strncpy(tr.name, DEFAULTS[t].name, sizeof(tr.name) - 1);
@@ -149,6 +153,17 @@ bool repitchNote(Pattern& p, uint8_t step, uint8_t oldPitch, uint8_t newPitch) {
   return false;
 }
 
+uint16_t sceneSteps(uint8_t scene) {
+  uint16_t len = 0;
+  if (scene >= SCENES) return 16;
+  for (uint8_t t = 0; t < TRACKS; t++) {
+    uint8_t pt = song.scenes[scene].pattern[t];
+    if (pt < PATTERNS && song.tracks[t].patterns[pt].length > len)
+      len = song.tracks[t].patterns[pt].length;
+  }
+  return len ? len : 16;
+}
+
 bool fxAt(const Pattern& p, uint8_t step, uint8_t* cmd, uint8_t* val) {
   for (const auto& x : p.fx)
     if (x.step == step) {
@@ -219,8 +234,9 @@ void setPatternLength(Pattern& p, uint8_t length) {
 //   per track: name[6] kind channel mute pattern [hold: v2+]
 //     per pattern: length u16 count, then count x {step offset pitch vel u16 len}
 //                  [v3+: u16 fxCount, then fxCount x {step cmd val}]
+//   [v4+: scenes SCENES x TRACKS bytes, u8 arrangeCount, arrange bytes, u8 songMode]
 static const char* SONG_DIR = "/songs";
-static constexpr uint8_t SONG_VERSION = 3;
+static constexpr uint8_t SONG_VERSION = 4;
 static bool fsReady = false;
 static char currentName[SONG_NAME_MAX + 1] = "";
 
@@ -282,6 +298,10 @@ static bool writeSong(File& f) {
       }
     }
   }
+  for (const auto& sc : song.scenes) f.write(sc.pattern, TRACKS);
+  f.write((uint8_t)song.arrange.size());
+  if (!song.arrange.empty()) f.write(song.arrange.data(), song.arrange.size());
+  f.write((uint8_t)song.songMode);
   return f.getWriteError() == 0;
 }
 
@@ -331,6 +351,22 @@ static bool readSong(File& f) {
         }
       }
     }
+  }
+  if (ver >= 4) {
+    for (auto& sc : song.scenes) {
+      if (f.read(sc.pattern, TRACKS) != TRACKS) return false;
+      for (auto& pt : sc.pattern)
+        if (pt >= PATTERNS) pt = SCENE_SILENT;
+    }
+    uint8_t n = 0, mode = 0;
+    if (f.read(&n, 1) != 1) return false;
+    song.arrange.resize(n);
+    if (n && f.read(song.arrange.data(), n) != n) return false;
+    for (auto& a : song.arrange)
+      if (a >= SCENES) a = 0;
+    if (song.arrange.empty()) song.arrange.assign(1, 0);
+    if (f.read(&mode, 1) != 1) return false;
+    song.songMode = mode != 0;
   }
   return true;
 }

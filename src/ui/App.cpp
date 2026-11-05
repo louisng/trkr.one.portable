@@ -51,7 +51,7 @@ static midi::LinkState lastBle, lastUsb;
 static bool adv = false;
 
 // Shortcut keys, looked up by key cap so they follow the layout table.
-static int8_t idxDigit[6];
+static int8_t idxDigit[8];
 static int8_t idxB = -1, idxU = -1, idxM = -1, idxP = -1, idxS = -1, idxT = -1;
 
 static int8_t findCap(const char* cap) {
@@ -126,9 +126,11 @@ static void handleMenuKey(uint8_t idx) {
   if (idx == idxDigit[0]) switchTo(liveScreen());
   else if (idx == idxDigit[1]) switchTo(stepScreen());
   else if (idx == idxDigit[2]) switchTo(trackerScreen());
-  else if (idx == idxDigit[3]) switchTo(songsScreen());
-  else if (idx == idxDigit[4]) switchTo(setupScreen());
-  else if (idx == idxDigit[5]) switchTo(keyTestScreen());
+  else if (idx == idxDigit[3]) switchTo(scenesScreen());
+  else if (idx == idxDigit[4]) switchTo(arrangeScreen());
+  else if (idx == idxDigit[5]) switchTo(songsScreen());
+  else if (idx == idxDigit[6]) switchTo(setupScreen());
+  else if (idx == idxDigit[7]) switchTo(keyTestScreen());
   else if (idx == idxB) toggleBle();
   else if (idx == idxU) toggleUsb();
   else if (idx == idxM) toggleSpeaker();
@@ -224,6 +226,10 @@ static void handleEvent(const keys::Event& e) {
     return;
   }
 
+  if (e.pressed && isAction && def.value == layout::ACT_PLAY && current->spaceIsPlay()) {
+    handleTransport(def.value);
+    return;
+  }
   if (current->musicKeys()) {
     if (e.pressed && isAction && handleTransport(def.value)) return;
     player::Played played;
@@ -279,6 +285,15 @@ static void drawStatusBar() {
     if (seq::recording()) canvas.fillCircle(tx + 3, 7, 4, 0xF800);
     else canvas.drawCircle(tx + 3, 7, 4, 0xF800);
   }
+  if (seq::song.songMode) {  // song mode: "S" + the arrangement row playing
+    char sp[8];
+    int pos = seq::songPosition();
+    if (pos >= 0) snprintf(sp, sizeof(sp), "S%02d", pos + 1);
+    else snprintf(sp, sizeof(sp), "S");
+    canvas.setTextColor(col::OK);
+    canvas.setTextDatum(middle_left);
+    canvas.drawString(sp, tx + 11, 7);
+  }
 
   int x = W - 3 - 24;
   drawPill(x, "SPK", settings.speaker ? midi::LinkState::Connected : midi::LinkState::Off);
@@ -304,8 +319,8 @@ static void drawMenu() {
   canvas.drawString("MENU  (hold `, press a key)", x + 8, y + 6);
 
   canvas.setTextColor(col::TEXT);
-  canvas.drawString("1 Live   2 Step   3 Tracker", x + 8, y + 20);
-  canvas.drawString("4 Songs  5 Setup  6 Key test", x + 8, y + 31);
+  canvas.drawString("1 Live  2 Step  3 Tracker  4 Scenes", x + 8, y + 20);
+  canvas.drawString("5 Arrange  6 Songs  7 Setup  8 Keys", x + 8, y + 31);
   char sv[40];
   snprintf(sv, sizeof(sv), "s Save %s", seq::currentSongName()[0] ? seq::currentSongName() : "as...");
   canvas.drawString(sv, x + 8, y + 42);
@@ -353,7 +368,7 @@ void begin() {
   adv = M5.getBoard() == m5::board_t::board_M5CardputerADV;
   canvas.setColorDepth(16);
   canvas.createSprite(W, H);
-  for (uint8_t i = 0; i < 6; i++) {
+  for (uint8_t i = 0; i < 8; i++) {
     char cap[2] = {(char)('1' + i), 0};
     idxDigit[i] = findCap(cap);
   }

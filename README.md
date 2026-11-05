@@ -22,6 +22,8 @@ USB MIDI sequencer for the Arduboy.
   piano octave on the top rows
 - Bluetooth LE MIDI and USB MIDI, each switchable on/off at any time
 - Simple speaker preview (switch off with fn+m when you only want MIDI out)
+- **Scenes + arrangement** (song mode): scenes 1–99 say which pattern each track plays;
+  the arrangement lists scenes in play order (e.g. `1 1 4 3 2 1 1 6`)
 - **Named songs**: save as many as fit (about 1.5 MB), with names typed on the keyboard;
   Songs screen to load / save over / delete. The song you had open loads at power-on.
 - **Tracker effects**: chance, ratchets, trig conditions, humanize, mod wheel, pitch bend,
@@ -54,7 +56,7 @@ Row 4  ct op alt z  x  c  v  b  n  m  ,  .  /  space     piano white keys
 | `'` | Step screen: pattern & track options |
 | `del` | Step screen: clear the step under the cursor; on an empty step, insert **OFF** (stops held notes) |
 | `` ` `` tap | cycle Step → Tracker → Live |
-| `` ` `` hold | menu: `1` Live, `2` Step, `3` Tracker, `4` Songs, `5` Setup, `6` Key test, `s` save song, `b` Bluetooth MIDI, `u` USB MIDI, `m` speaker, `p` top rows mode |
+| `` ` `` hold | menu: `1` Live, `2` Step, `3` Tracker, `4` Scenes, `5` Arrange, `6` Songs, `7` Setup, `8` Key test, `s` save song, `b` Bluetooth MIDI, `u` USB MIDI, `m` speaker, `p` top rows mode |
 | `fn` + `m` / `p` / `b` / `u` / `s` | speaker on/off · top rows piano ↔ drums+chords · Bluetooth MIDI · USB MIDI · save song (asks for a name the first time) |
 | `fn` + `,` / `/` · `;` / `.` · `t` | tempo −1 / +1 · +10 / −10 · tap tempo |
 
@@ -104,6 +106,25 @@ classic tracker layout: `q w e r t y u i o p [ ] \` are white keys (C up to A) a
 
     Rows with an effect show its letter on the Step screen too.
   - `'` opens the same track options as the Step screen.
+- **Scenes:** rows are scenes 01–99, columns are tracks; each cell is the pattern that
+  track plays in that scene (`1`–`8`) or `--` for silent.
+  - `;`/`.` pick a scene (`opt` = 10 at a time), `,`/`/` pick a track.
+  - Type `1`–`8` to set the pattern, `0`/`-`/`del` for silent, or `f`/`l` to step through.
+  - `enter` applies the scene right now (every track switches to its patterns, so you can
+    hear and edit them on the Step / Tracker screens).
+  - `c` captures the patterns the tracks are on right now into the scene.
+  - Scenes used in the arrangement are bright, the one playing is green.
+  - A scene lasts as long as its longest pattern; shorter patterns loop inside it.
+- **Arrange:** the order scenes play in.
+  - Type a scene number and press `enter`: it fills the row and moves down; on the last
+    (empty) row it adds a new one, so `1 enter 1 enter 4 enter 3 enter` builds the list.
+  - `f`/`l` change the scene on a row, `del` removes a row (or erases typed digits).
+  - `'` switches **song mode** on/off. In song mode, `space` plays the arrangement from the
+    selected row, looping back to the top at the end; the status bar shows `S` and the
+    row playing. Every scene starts all its patterns from step 1.
+  - Each row shows the scene's patterns per track and its length in steps.
+  - The Step and Tracker screens follow the patterns of the scene that's playing, so you
+    edit what you hear. Pattern mode (song mode off) just loops each track's pattern.
 - **Songs:** the saved songs, sorted by name, with the open one in yellow.
   `;`/`.` pick, `enter` loads, `s` saves the open song over the selected one, `del` deletes;
   each asks for a second press to confirm. *Save as new name...* lets you type a name
@@ -164,7 +185,7 @@ The device advertises as **Cardputer MIDI**.
 2. **Sequencer** ✅: clock, song/pattern data model, step sequencer, live recording with quantize
 3. **Tracker** ✅: tracker view of the same data (every note's pitch, velocity, length, timing offset)
 4. **Synth engine**: 8-track internal synth + drum synth (speaker; headphones on ADV)
-5. **Song mode + storage**: pattern arranger, save/load on SD card, MIDI clock in/out
+5. **Song mode + storage**: scenes + arrangement ✅, named songs ✅; still to do: SD card, MIDI clock in/out
 
 All views edit one shared song model, so anything entered in the step sequencer
 or recorded live shows up in the tracker immediately, and the other way round.
@@ -185,5 +206,5 @@ src/
   midi/BleMidi        BLE MIDI peripheral (NimBLE)
   audio/Monitor       speaker preview
   app/BootGuard       startup crash report
-  ui/                 screens (Step, Tracker, Live, Songs, Setup, Key test), track options panel + effect helpers, status bar, menu
+  ui/                 screens (Step, Tracker, Live, Scenes, Arrange, Songs, Setup, Key test), track options panel + effect helpers, status bar, menu
 ```

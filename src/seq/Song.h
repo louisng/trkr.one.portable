@@ -75,9 +75,22 @@ struct Track {
   Pattern& cur() { return patterns[pattern]; }
 };
 
+// Scenes say which pattern each track plays (or that it's silent); the
+// arrangement is the order scenes play in when song mode is on.
+static constexpr uint8_t SCENES = 99;
+static constexpr uint8_t ARRANGE_MAX = 128;
+static constexpr uint8_t SCENE_SILENT = 0xFF;
+
+struct Scene {
+  uint8_t pattern[TRACKS];  // 0-7, or SCENE_SILENT
+};
+
 struct Song {
   uint16_t bpm = 120;
   Track tracks[TRACKS];
+  Scene scenes[SCENES];
+  std::vector<uint8_t> arrange;  // scene indices 0-98, played in order
+  bool songMode = false;         // play the arrangement instead of looping patterns
 };
 
 extern Song song;
@@ -111,6 +124,9 @@ bool doublePattern(Pattern& p);
 // Put a note-off on a step (replacing its notes).
 void setStepOff(Pattern& p, uint8_t step);
 bool isOffStep(const Pattern& p, uint8_t step);
+
+// Length in steps of a scene: its longest non-silent pattern (16 if all silent).
+uint16_t sceneSteps(uint8_t scene);
 
 bool fxAt(const Pattern& p, uint8_t step, uint8_t* cmd, uint8_t* val);
 void setFx(Pattern& p, uint8_t step, uint8_t cmd, uint8_t val);  // cmd FX_NONE removes

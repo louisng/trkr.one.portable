@@ -42,6 +42,13 @@ void releaseTrack(uint8_t t);
 // Returns the number of taps in the current run.
 uint8_t tapTempo();
 
+// Song mode (song.songMode): play the arrangement. Start position for play(),
+// the arrangement row playing now (-1 if not in song mode / stopped), and
+// switching every track to a scene's patterns right away.
+void setSongStart(uint8_t pos);
+int songPosition();
+void applyScene(uint8_t scene);
+
 // Current step of a track's pattern, or -1 when stopped.
 int trackStep(uint8_t t);
 

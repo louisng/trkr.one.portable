@@ -32,8 +32,11 @@ class Screen {
  public:
   virtual ~Screen() = default;
   virtual const char* title() const = 0;
-  // Whether piano / chord / drum keys play notes while this screen is open.
+  // Whether piano / chord / drum keys play notes while this screen is open
+  // (and enter arms recording).
   virtual bool musicKeys() const { return true; }
+  // Whether space plays / stops on this screen.
+  virtual bool spaceIsPlay() const { return true; }
   virtual void onEnter() {}
   virtual void onLeave() {}
   // Action keys (arrows, enter, del, space) -- presses only.
@@ -51,6 +54,8 @@ Screen* liveScreen();
 Screen* stepScreen();
 Screen* trackerScreen();
 Screen* songsScreen();
+Screen* scenesScreen();
+Screen* arrangeScreen();
 void songsStartSaveAs();  // call before switching to songsScreen()
 Screen* setupScreen();
 Screen* keyTestScreen();

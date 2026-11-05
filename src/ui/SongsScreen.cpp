@@ -30,7 +30,8 @@ enum Pending : uint8_t { P_NONE, P_LOAD, P_DELETE, P_OVERWRITE, P_NEW, P_SAVE_EX
 class SongsScreen : public Screen {
  public:
   const char* title() const override { return "SONGS"; }
-  bool musicKeys() const override { return false; }  // the keyboard types names here
+  bool musicKeys() const override { return false; }
+  bool spaceIsPlay() const override { return false; }  // the keyboard types names here
 
   void onEnter() override {
     refresh();
