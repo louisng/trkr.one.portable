@@ -2,6 +2,8 @@
 #include <M5Cardputer.h>
 #include <stdint.h>
 
+#include "../play/LivePlayer.h"
+
 namespace ui {
 
 static constexpr int W = 240;
@@ -30,23 +32,39 @@ class Screen {
  public:
   virtual ~Screen() = default;
   virtual const char* title() const = 0;
-  // Whether piano / chord / drum keys play notes while this screen is open.
+  // Whether piano / chord / drum keys play notes while this screen is open
+  // (and enter arms recording).
   virtual bool musicKeys() const { return true; }
+  // Whether space plays / stops on this screen.
+  virtual bool spaceIsPlay() const { return true; }
   virtual void onEnter() {}
   virtual void onLeave() {}
   // Action keys (arrows, enter, del, space) -- presses only.
   virtual void onAction(uint8_t action) {}
+  // A musical key was played (not while live recording). Used for step entry.
+  virtual void onPlayed(uint8_t key, const player::Played& p) {}
   // Every raw key event, before anything else handles it.
   virtual void onRawKey(uint8_t index, bool pressed) {}
   virtual void draw(M5Canvas& c) = 0;
+  // True while the screen needs periodic redraws (blinking cursor etc.).
+  virtual bool animating() const { return false; }
 };
 
 Screen* liveScreen();
+Screen* stepScreen();
+Screen* trackerScreen();
+Screen* songsScreen();
+Screen* scenesScreen();
+Screen* arrangeScreen();
+Screen* synthScreen();
+Screen* drumMidiScreen();
+void songsStartSaveAs();  // call before switching to songsScreen()
 Screen* setupScreen();
 Screen* keyTestScreen();
 
 // Shared helpers (App.cpp)
 void toast(const char* msg);
+void goTo(Screen* s);  // switch screens from inside a screen / panel
 void markDirty();
 bool isAdv();
 

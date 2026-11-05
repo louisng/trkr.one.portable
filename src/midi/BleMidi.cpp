@@ -1,114 +1,107 @@
 #include "BleMidi.h"
 
 #include <Arduino.h>
-#include <NimBLEDevice.h>
+#include <BLEDevice.h>
+#include <BLEServer.h>
+
+// Uses the BLE library that ships with the ESP32 Arduino core (NimBLE-based in
+// core 3.3+). An earlier build linked the separate NimBLE-Arduino library on
+// top of the core's own NimBLE stack, which is a likely cause of crashes at boot.
 
 namespace blemidi {
 
 static const char* MIDI_SERVICE_UUID = "03B80E5A-EDE8-4B33-A751-6CE34EC4C700";
 static const char* MIDI_CHAR_UUID = "7772E5DB-3868-4112-A1A9-F2669D106BF3";
 
-static NimBLEServer* server = nullptr;
-static NimBLECharacteristic* midiChar = nullptr;
+static BLEServer* server = nullptr;
+static BLECharacteristic* midiChar = nullptr;
 static bool isEnabled = false;
-static volatile bool subscribed = false;  // host has enabled notifications
 static volatile uint16_t peerMtu = 23;
 
 // Outgoing packet: [header][ts][status][d1][d2][ts][status][d1][d2]...
 static uint8_t pkt[128];
 static size_t pktLen = 0;
 
-class ServerCallbacks : public NimBLEServerCallbacks {
-  void onConnect(NimBLEServer* s, NimBLEConnInfo& info) override {
-    // Ask for a short connection interval (7.5-15 ms) for low latency.
-    s->updateConnParams(info.getConnHandle(), 6, 12, 0, 200);
-  }
-  void onDisconnect(NimBLEServer*, NimBLEConnInfo&, int) override {
-    subscribed = false;
-    peerMtu = 23;
-    // NimBLE restarts advertising automatically (advertiseOnDisconnect).
-  }
-  void onMTUChange(uint16_t mtu, NimBLEConnInfo&) override { peerMtu = mtu; }
-};
-
-class CharCallbacks : public NimBLECharacteristicCallbacks {
-  void onSubscribe(NimBLECharacteristic*, NimBLEConnInfo&, uint16_t subValue) override {
-    subscribed = (subValue & 0x0001) != 0;
-  }
-  // Incoming MIDI (onWrite) is ignored for now; MIDI clock-in comes later.
+class ServerCallbacks : public BLEServerCallbacks {
+  void onConnect(BLEServer*) override {}
+  void onDisconnect(BLEServer*) override { peerMtu = 23; }
+#if defined(CONFIG_NIMBLE_ENABLED)
+  void onMtuChanged(BLEServer*, ble_gap_conn_desc*, uint16_t mtu) override { peerMtu = mtu; }
+#endif
 };
 
 static ServerCallbacks serverCallbacks;
-static CharCallbacks charCallbacks;
 
 void begin(const char* deviceName) {
   if (server) return;
-  NimBLEDevice::init(deviceName);
-  NimBLEDevice::setMTU(128);
-  server = NimBLEDevice::createServer();
-  server->setCallbacks(&serverCallbacks, false);
-  server->advertiseOnDisconnect(true);
+  BLEDevice::init(deviceName);
+  BLEDevice::setMTU(128);
+  server = BLEDevice::createServer();
+  server->setCallbacks(&serverCallbacks);
+  server->advertiseOnDisconnect(false);  // only advertise while enabled
 
-  NimBLEService* svc = server->createService(MIDI_SERVICE_UUID);
-  midiChar = svc->createCharacteristic(
-      MIDI_CHAR_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE_NR | NIMBLE_PROPERTY::NOTIFY);
-  midiChar->setCallbacks(&charCallbacks);
-  uint8_t empty[1] = {0};
-  midiChar->setValue(empty, 0);
+  BLEService* svc = server->createService(MIDI_SERVICE_UUID);
+  midiChar = svc->createCharacteristic(MIDI_CHAR_UUID, BLECharacteristic::PROPERTY_READ |
+                                                           BLECharacteristic::PROPERTY_WRITE_NR |
+                                                           BLECharacteristic::PROPERTY_NOTIFY);
   svc->start();
 
-  NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
-  NimBLEAdvertisementData advData;
-  advData.setFlags(BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP);
-  advData.addServiceUUID(MIDI_SERVICE_UUID);
-  NimBLEAdvertisementData scanData;  // name lives in the scan response (adv packet is full)
+  BLEAdvertising* adv = BLEDevice::getAdvertising();
+  BLEAdvertisementData advData;
+  advData.setFlags(0x06);  // general discoverable, BR/EDR not supported
+  advData.setCompleteServices(BLEUUID(MIDI_SERVICE_UUID));
+  BLEAdvertisementData scanData;  // the name goes in the scan response (adv packet is full)
   scanData.setName(deviceName);
   adv->setAdvertisementData(advData);
   adv->setScanResponseData(scanData);
-  adv->enableScanResponse(true);
 }
 
 void setEnabled(bool on) {
   if (!server) return;
   isEnabled = on;
-  NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
+  server->advertiseOnDisconnect(on);
+  BLEAdvertising* adv = BLEDevice::getAdvertising();
   if (on) {
-    server->advertiseOnDisconnect(true);
-    if (!adv->isAdvertising() && server->getConnectedCount() == 0) adv->start();
+    if (server->getConnectedCount() == 0) adv->start();
   } else {
-    server->advertiseOnDisconnect(false);
     adv->stop();
-    for (uint16_t handle : server->getPeerDevices()) server->disconnect(handle);
-    subscribed = false;
+    for (auto& peer : server->getPeerDevices(false)) server->disconnect(peer.first);
     pktLen = 0;
   }
 }
 
 bool enabled() { return isEnabled; }
-bool connected() { return isEnabled && subscribed && server && server->getConnectedCount() > 0; }
-
-static void writeTimestampedHeader() {
-  uint16_t ts = (uint16_t)(millis() & 0x1FFF);  // 13-bit ms timestamp
-  pkt[0] = 0x80 | ((ts >> 7) & 0x3F);
-  pktLen = 1;
-}
+bool connected() { return isEnabled && server && server->getConnectedCount() > 0; }
 
 void flush() {
-  if (pktLen > 1 && connected()) midiChar->notify(pkt, pktLen);
+  if (pktLen > 1 && connected()) {
+    midiChar->setValue(pkt, pktLen);
+    midiChar->notify();
+  }
   pktLen = 0;
 }
 
-void send(uint8_t status, uint8_t d1, uint8_t d2) {
+static void sendBytes(const uint8_t* msg, uint8_t n) {
   if (!connected()) return;
   size_t maxPayload = peerMtu > 3 ? peerMtu - 3 : 20;
   if (maxPayload > sizeof(pkt)) maxPayload = sizeof(pkt);
-  if (pktLen + 4 > maxPayload) flush();
-  if (pktLen == 0) writeTimestampedHeader();
+  if (pktLen + 1 + n > maxPayload) flush();
   uint16_t ts = (uint16_t)(millis() & 0x1FFF);
+  if (pktLen == 0) pkt[pktLen++] = 0x80 | ((ts >> 7) & 0x3F);
   pkt[pktLen++] = 0x80 | (ts & 0x7F);
-  pkt[pktLen++] = status;
-  pkt[pktLen++] = d1 & 0x7F;
-  pkt[pktLen++] = d2 & 0x7F;
+  for (uint8_t i = 0; i < n; i++) pkt[pktLen++] = i == 0 ? msg[0] : (msg[i] & 0x7F);
+}
+
+void send1(uint8_t status) { sendBytes(&status, 1); }
+
+void send2(uint8_t status, uint8_t d1) {
+  uint8_t m[2] = {status, d1};
+  sendBytes(m, 2);
+}
+
+void send(uint8_t status, uint8_t d1, uint8_t d2) {
+  uint8_t m[3] = {status, d1, d2};
+  sendBytes(m, 3);
 }
 
 }  // namespace blemidi

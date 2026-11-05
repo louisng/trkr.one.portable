@@ -5,15 +5,17 @@
 
 Settings settings;
 
-static const uint32_t SETTINGS_VERSION = 1;
+static const uint32_t SETTINGS_VERSION = 2;  // bump when Settings changes
 static Settings saved;  // copy of what is in flash, to skip redundant writes
 
 void settingsLoad() {
   Preferences prefs;
   if (!prefs.begin("cmc", true)) return;  // first boot: namespace doesn't exist yet
-  if (prefs.getUInt("ver", 0) == SETTINGS_VERSION &&
-      prefs.getBytesLength("s") == sizeof(Settings)) {
-    prefs.getBytes("s", &settings, sizeof(Settings));
+  // Fields are only ever appended, so a shorter blob from an older build is a
+  // valid prefix: load what's there and keep defaults for the rest.
+  size_t len = prefs.getBytesLength("s");
+  if (prefs.getUInt("ver", 0) == SETTINGS_VERSION && len > 0 && len <= sizeof(Settings)) {
+    prefs.getBytes("s", &settings, len);
   }
   prefs.end();
   saved = settings;

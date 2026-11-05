@@ -6,6 +6,7 @@
 #include "../input/KeyLayout.h"
 #include "../music/Theory.h"
 #include "../play/LivePlayer.h"
+#include "../seq/Engine.h"
 #include "Screen.h"
 
 namespace ui {
@@ -37,8 +38,8 @@ void drawKeyMap(M5Canvas& c, int top, bool showCaps) {
                    theory::chordButtonLabel(settings.scale, def.value));
           break;
         case Role::Piano: {
-          bool black = (def.value == 1 || def.value == 3 || def.value == 6 ||
-                        def.value == 8 || def.value == 10);
+          const uint8_t pc = def.value % 12;
+          bool black = (pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10);
           bg = black ? col::BLACK_KEY : col::WHITE_KEY;
           fg = black ? col::TEXT : TFT_BLACK;
           int n = player::pianoNoteFor(def.value);
@@ -74,20 +75,16 @@ class LiveScreen : public Screen {
   void onAction(uint8_t a) override {
     switch (a) {
       case layout::ACT_UP:
-        settings.velocity = settings.velocity >= 117 ? 127 : settings.velocity + 10;
+        seq::selectTrack((seq::selectedTrack() + seq::TRACKS - 1) % seq::TRACKS);
         break;
       case layout::ACT_DOWN:
-        settings.velocity = settings.velocity <= 11 ? 1 : settings.velocity - 10;
+        seq::selectTrack((seq::selectedTrack() + 1) % seq::TRACKS);
         break;
       case layout::ACT_LEFT:
-        settings.root = (settings.root + 11) % 12;
+        settings.velocity = settings.velocity <= 11 ? 1 : settings.velocity - 10;
         break;
       case layout::ACT_RIGHT:
-        settings.root = (settings.root + 1) % 12;
-        break;
-      case layout::ACT_ENTER:
-      case layout::ACT_PLAY:
-        toast("Sequencer arrives in phase 2");
+        settings.velocity = settings.velocity >= 117 ? 127 : settings.velocity + 10;
         break;
       default:
         break;
@@ -115,9 +112,10 @@ class LiveScreen : public Screen {
 
     c.setTextDatum(top_left);
     c.setTextColor(col::DIM);
-    snprintf(buf, sizeof(buf), "piano %s  ch P%d C%d D%d",
-             settings.pianoScaleMode ? "scale" : "chrom", settings.pianoCh, settings.chordCh,
-             settings.drumCh);
+    const auto& st = seq::song.tracks[seq::liveSynthTrack()];
+    const auto& dt = seq::song.tracks[seq::liveDrumTrack()];
+    snprintf(buf, sizeof(buf), "keys>%d %s ch%d  drums>%d %s ch%d", seq::liveSynthTrack() + 1,
+             st.name, st.channel, seq::liveDrumTrack() + 1, dt.name, dt.channel);
     c.drawString(buf, 8, 48);
 
     drawKeyMap(c, 62, false);

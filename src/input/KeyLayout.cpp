@@ -23,12 +23,12 @@ static const KeyDef LAYOUT[ROWS][COLS] = {
   { {R::Action, ACT_FN, "FN"}, {R::Action, ACT_SHIFT, "7TH"},
     {R::Action, ACT_OCT_DOWN, "OC-"},
     {R::Piano, 1, nullptr}, {R::Piano, 3, nullptr},
-    {R::Action, ACT_FREE, ""},
+    {R::Action, ACT_SHORTER, "LN-"},
     {R::Piano, 6, nullptr}, {R::Piano, 8, nullptr}, {R::Piano, 10, nullptr},
     {R::Action, ACT_OCT_UP, "OC+"},
-    {R::Action, ACT_FREE, ""},
+    {R::Action, ACT_LONGER, "LN+"},
     {R::Action, ACT_UP, "^"},
-    {R::Action, ACT_FREE, ""},
+    {R::Action, ACT_OPTIONS, "OPT"},
     {R::Action, ACT_ENTER, "REC"} },
   // Row 3: ctrl opt alt z x c v b n m , . / space
   { {R::Action, ACT_CTRL, "9TH"}, {R::Action, ACT_OPT, "M/m"}, {R::Action, ACT_ALT, "SUS"},
@@ -38,6 +38,30 @@ static const KeyDef LAYOUT[ROWS][COLS] = {
     {R::Action, ACT_LEFT, "<"}, {R::Action, ACT_DOWN, "v"}, {R::Action, ACT_RIGHT, ">"},
     {R::Action, ACT_PLAY, "PLY"} },
 };
+
+// Upper-piano mode (fn+p): the top two rows become a second, higher octave
+// in the classic tracker layout. Values are semitones above the bottom rows'
+// C, so q = C one octave up. Unused keys (1 4 8 -) do nothing.
+static const KeyDef UPPER[2][COLS] = {
+  // Row 0: ` 1 2 3 4 5 6 7 8 9 0 - = del
+  { {R::Action, ACT_MENU, "MNU"}, {R::None, 0, ""},
+    {R::Piano, 13, nullptr}, {R::Piano, 15, nullptr}, {R::None, 0, ""},
+    {R::Piano, 18, nullptr}, {R::Piano, 20, nullptr}, {R::Piano, 22, nullptr},
+    {R::None, 0, ""}, {R::Piano, 25, nullptr}, {R::Piano, 27, nullptr},
+    {R::None, 0, ""}, {R::Piano, 30, nullptr},
+    {R::Action, ACT_DELETE, "DEL"} },
+  // Row 1: tab q w e r t y u i o p [ ] backslash
+  { {R::Action, ACT_INVERSION, "INV"},
+    {R::Piano, 12, nullptr}, {R::Piano, 14, nullptr}, {R::Piano, 16, nullptr},
+    {R::Piano, 17, nullptr}, {R::Piano, 19, nullptr}, {R::Piano, 21, nullptr},
+    {R::Piano, 23, nullptr}, {R::Piano, 24, nullptr}, {R::Piano, 26, nullptr},
+    {R::Piano, 28, nullptr}, {R::Piano, 29, nullptr}, {R::Piano, 31, nullptr},
+    {R::Piano, 33, nullptr} },
+};
+
+static bool upper = false;
+void setUpperPiano(bool on) { upper = on; }
+bool upperPiano() { return upper; }
 
 static const char* const CAPS[ROWS][COLS] = {
   { "`", "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "-", "=", "del" },
@@ -51,6 +75,7 @@ static const KeyDef NONE_KEY = {R::None, 0, ""};
 
 const KeyDef& keyAt(uint8_t row, uint8_t col) {
   if (row >= ROWS || col >= COLS) return NONE_KEY;
+  if (upper && row < 2) return UPPER[row][col];
   return LAYOUT[row][col];
 }
 

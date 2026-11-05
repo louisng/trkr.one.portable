@@ -7,7 +7,7 @@
 //
 //   Row 0  `  1  2  3  4  5  6  7  8  9  0  -  =  del   drum pads 1-12
 //   Row 1  tab q  w  e  r  t  y  u  i  o  p  [  ]  \    chord buttons
-//   Row 2  fn sh a  s  d  f  g  h  j  k  l  ;  '  ent   piano black keys
+//   Row 2  fn sh a  s  d  f  g  h  j  k  l  ;  '  ent   piano black keys (+ a/k octave, f/l length, ' options)
 //   Row 3  ct op al z  x  c  v  b  n  m  ,  .  /  spc   piano white keys
 //
 // The printed arrow keys (; , . /) are dedicated cursor keys: no fn needed.
@@ -23,7 +23,7 @@ enum class Role : uint8_t {
   None,
   Drum,    // value = pad index 0-11
   Chord,   // value = chord button index 0-12
-  Piano,   // value = semitone 0-11 (C..B) / scale degree when in scale mode
+  Piano,   // value = semitones above the bottom rows' C (0-11 bottom rows, 12-33 upper piano)
   Action,  // value = Action
 };
 
@@ -45,7 +45,10 @@ enum Action : uint8_t {
   ACT_CTRL,       // chord modifier: add 9th
   ACT_OPT,        // chord modifier: swap major/minor
   ACT_ALT,        // chord modifier: sus4
-  ACT_FREE,       // unassigned (f, l, ') -- reserved for later
+  ACT_SHORTER,    // f: shorten the note just entered / under the cursor
+  ACT_LONGER,     // l: lengthen it
+  ACT_OPTIONS,    // ': pattern / track options panel
+  ACT_FREE,       // unassigned
 };
 
 struct KeyDef {
@@ -57,6 +60,11 @@ struct KeyDef {
 // Index = row * COLS + col
 const KeyDef& keyAt(uint8_t row, uint8_t col);
 inline const KeyDef& keyAt(uint8_t index) { return keyAt(index / COLS, index % COLS); }
+
+// Upper-piano mode: top two rows become a second piano octave instead of
+// drum pads and chord buttons.
+void setUpperPiano(bool on);
+bool upperPiano();
 
 // Printable character for a key (for the key-test screen).
 const char* keyCapLabel(uint8_t row, uint8_t col);
