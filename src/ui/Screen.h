@@ -47,6 +47,7 @@ class Screen {
 
 Screen* liveScreen();
 Screen* stepScreen();
+Screen* trackerScreen();
 Screen* setupScreen();
 Screen* keyTestScreen();
 

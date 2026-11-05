@@ -16,6 +16,7 @@
 #include "../play/LivePlayer.h"
 #include "../seq/Engine.h"
 #include "Screen.h"
+#include "TrackOptions.h"
 
 namespace ui {
 
@@ -24,51 +25,20 @@ using namespace seq;
 static constexpr int PAGE = 16;
 static constexpr int GRID_TOP = 40;
 
-enum Opt : uint8_t {
-  OPT_PATTERN,
-  OPT_LENGTH,
-  OPT_DOUBLE,
-  OPT_HOLD,
-  OPT_CHANNEL,
-  OPT_TYPE,
-  OPT_MUTE,
-  OPT_BPM,
-  OPT_COUNT
-};
-static const char* const OPT_LABELS[OPT_COUNT] = {"Pattern", "Length",       "Double it",
-                                                  "Notes end", "MIDI channel", "Type",
-                                                  "Mute",    "Tempo"};
-
-// Note lengths f / l step through: 1/4, 1/2 step, then whole steps.
-static uint16_t nextLength(uint16_t len, bool longer, uint16_t maxLen) {
-  const uint16_t T = TICKS_PER_STEP;
-  uint16_t r;
-  if (longer) r = len < T / 4 ? T / 4 : len < T / 2 ? T / 2 : len < T ? T : (len / T + 1) * T;
-  else r = len > T ? ((len - 1) / T) * T : len > T / 2 ? T / 2 : T / 4;
-  return r > maxLen ? maxLen : r;
-}
-
-static void formatLength(uint16_t len, char* out, size_t n) {
-  const uint16_t T = TICKS_PER_STEP;
-  if (len < T) snprintf(out, n, "1/%d step", T / len);
-  else if (len % T == 0) snprintf(out, n, "%d step%s", len / T, len == T ? "" : "s");
-  else snprintf(out, n, "%.1f steps", (float)len / T);
-}
-
 class StepScreen : public Screen {
  public:
   const char* title() const override { return "STEP"; }
 
   void onEnter() override {
-    panel = false;
+    options::close();
     entryHeld = 0;
   }
 
   void onAction(uint8_t a) override {
     Track& tr = song.tracks[selectedTrack()];
     Pattern& p = tr.cur();
-    if (panel) {
-      panelAction(a, tr);
+    if (options::isOpen()) {
+      if (options::onAction(a)) resetEntry();
       return;
     }
     switch (a) {
@@ -93,25 +63,22 @@ class StepScreen : public Screen {
         NoteEvent ev[MAX_NOTES_PER_STEP];
         uint8_t n = notesAt(p, target, ev);
         uint16_t cur = (n && ev[0].pitch != PITCH_OFF) ? ev[0].len : entryLen;
-        uint16_t len = nextLength(cur, a == layout::ACT_LONGER, (uint16_t)p.length * TICKS_PER_STEP);
+        uint16_t len = nextNoteLength(cur, a == layout::ACT_LONGER, (uint16_t)p.length * TICKS_PER_STEP);
         if (n) setStepLength(p, target, len);
         entryLen = len;  // next entries match
         char msg[32], l[16];
-        formatLength(len, l, sizeof(l));
+        formatNoteLength(len, l, sizeof(l));
         snprintf(msg, sizeof(msg), "Note length: %s", l);
         toast(msg);
         break;
       }
-      case layout::ACT_OPTIONS:
-        panel = true;
-        panelSel = 0;
-        break;
+      case layout::ACT_OPTIONS: options::open(); break;
       default: break;
     }
   }
 
   void onPlayed(uint8_t, const player::Played& pl) override {
-    if (panel) return;
+    if (options::isOpen()) return;
     const uint8_t t = selectedTrack();
     Track& tr = song.tracks[t];
     Pattern& p = tr.cur();
@@ -151,7 +118,7 @@ class StepScreen : public Screen {
     drawTrackStrip(c);
     if (tr.kind == TrackKind::Drum) drawDrumGrid(c, t, p);
     else drawSynthGrid(c, t, p);
-    if (panel) drawPanel(c, tr);
+    if (options::isOpen()) options::draw(c);
   }
 
  private:
@@ -160,8 +127,6 @@ class StepScreen : public Screen {
   int entryStep = -1;
   uint8_t entryHeld = 0;
   uint16_t entryLen = TICKS_PER_STEP;
-  bool panel = false;
-  uint8_t panelSel = 0;
 
   void resetEntry() {
     lastEntered = -1;
@@ -172,100 +137,6 @@ class StepScreen : public Screen {
   void moveCursor(int d, const Pattern& p) {
     cursor = (cursor + d + p.length) % p.length;
     resetEntry();
-  }
-
-  // ── Options panel ──────────────────────────────────────────────────────────
-  void panelAction(uint8_t a, Track& tr) {
-    int d = 0;
-    switch (a) {
-      case layout::ACT_UP: panelSel = (panelSel + OPT_COUNT - 1) % OPT_COUNT; return;
-      case layout::ACT_DOWN: panelSel = (panelSel + 1) % OPT_COUNT; return;
-      case layout::ACT_LEFT: d = -1; break;
-      case layout::ACT_RIGHT: d = +1; break;
-      case layout::ACT_SHORTER: d = -16; break;  // f / l: a bar at a time
-      case layout::ACT_LONGER: d = +16; break;
-      case layout::ACT_OPTIONS:
-      case layout::ACT_DELETE: panel = false; return;
-      default: return;
-    }
-    switch (panelSel) {
-      case OPT_PATTERN:
-        tr.pattern = (uint8_t)((tr.pattern + PATTERNS + (d > 0 ? 1 : -1)) % PATTERNS);
-        resetEntry();
-        break;
-      case OPT_LENGTH: {
-        int len = tr.cur().length + d;
-        setPatternLength(tr.cur(), (uint8_t)(len < 1 ? 1 : len > MAX_STEPS ? MAX_STEPS : len));
-        break;
-      }
-      case OPT_DOUBLE:
-        toast(doublePattern(tr.cur()) ? "Pattern doubled" : "Too long to double (max 128)");
-        break;
-      case OPT_HOLD:
-        tr.hold = !tr.hold;
-        releaseTrack(selectedTrack());
-        break;
-      case OPT_CHANNEL:
-        player::releaseAll();
-        releaseTrack(selectedTrack());
-        tr.channel = (uint8_t)((tr.channel - 1 + (d > 0 ? 1 : -1) + 16) % 16 + 1);
-        break;
-      case OPT_TYPE:
-        player::releaseAll();
-        releaseTrack(selectedTrack());
-        tr.kind = tr.kind == TrackKind::Drum ? TrackKind::Synth : TrackKind::Drum;
-        break;
-      case OPT_MUTE:
-        tr.mute = !tr.mute;
-        if (tr.mute) releaseTrack(selectedTrack());
-        break;
-      case OPT_BPM: {
-        int b = song.bpm + d;
-        song.bpm = (uint16_t)(b < BPM_MIN ? BPM_MIN : b > BPM_MAX ? BPM_MAX : b);
-        break;
-      }
-      default: break;
-    }
-  }
-
-  void drawPanel(M5Canvas& c, const Track& tr) {
-    const int x = 20, y = 16, w = 200, rowH = 11, h = 18 + OPT_COUNT * rowH + 12;
-    c.fillRoundRect(x, y, w, h, 5, col::BAR);
-    c.drawRoundRect(x, y, w, h, 5, col::ACCENT);
-    c.setFont(&fonts::Font0);
-    c.setTextDatum(top_left);
-    c.setTextColor(col::ACCENT);
-    char buf[24];
-    snprintf(buf, sizeof(buf), "TRACK %d %s", selectedTrack() + 1, tr.name);
-    c.drawString(buf, x + 8, y + 6);
-    for (uint8_t i = 0; i < OPT_COUNT; i++) {
-      int ry = y + 18 + i * rowH;
-      if (i == panelSel) c.fillRect(x + 3, ry - 2, w - 6, rowH, col::SELECT);
-      c.setTextDatum(top_left);
-      c.setTextColor(i == panelSel ? col::TEXT : col::DIM);
-      c.drawString(OPT_LABELS[i], x + 8, ry);
-      switch (i) {
-        case OPT_PATTERN: snprintf(buf, sizeof(buf), "%d / %d", tr.pattern + 1, PATTERNS); break;
-        case OPT_LENGTH: {
-          int len = tr.patterns[tr.pattern].length;
-          if (len % 16 == 0) snprintf(buf, sizeof(buf), "%d (%d bar%s)", len, len / 16, len == 16 ? "" : "s");
-          else snprintf(buf, sizeof(buf), "%d steps", len);
-          break;
-        }
-        case OPT_DOUBLE: snprintf(buf, sizeof(buf), "press , or /"); break;
-        case OPT_HOLD: snprintf(buf, sizeof(buf), "%s", tr.hold ? "next note (hold)" : "after length"); break;
-        case OPT_CHANNEL: snprintf(buf, sizeof(buf), "%d", tr.channel); break;
-        case OPT_TYPE: snprintf(buf, sizeof(buf), "%s", tr.kind == TrackKind::Drum ? "drums" : "synth"); break;
-        case OPT_MUTE: snprintf(buf, sizeof(buf), "%s", tr.mute ? "MUTED" : "off"); break;
-        case OPT_BPM: snprintf(buf, sizeof(buf), "%d bpm", song.bpm); break;
-      }
-      c.setTextDatum(top_right);
-      c.setTextColor(i == panelSel ? col::HELD : col::TEXT);
-      c.drawString(buf, x + w - 8, ry);
-    }
-    c.setTextDatum(top_left);
-    c.setTextColor(col::DIM);
-    c.drawString("; . pick  , / change  f/l: bar  ' close", x + 8, y + h - 11);
   }
 
   // ── Header + track strip ───────────────────────────────────────────────────

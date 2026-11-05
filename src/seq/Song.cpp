@@ -112,6 +112,42 @@ void setStepLength(Pattern& p, uint8_t step, uint16_t lenTicks) {
     if (e.step == step && e.pitch != PITCH_OFF) e.len = lenTicks ? lenTicks : 1;
 }
 
+void setStepVelocity(Pattern& p, uint8_t step, uint8_t vel) {
+  if (vel < 1) vel = 1;
+  if (vel > 127) vel = 127;
+  for (auto& e : p.notes)
+    if (e.step == step && e.pitch != PITCH_OFF) e.vel = vel;
+}
+
+void setStepOffset(Pattern& p, uint8_t step, int8_t offset) {
+  const int8_t lo = -(int8_t)(TICKS_PER_STEP / 2), hi = (int8_t)(TICKS_PER_STEP / 2 - 1);
+  if (offset < lo) offset = lo;
+  if (offset > hi) offset = hi;
+  for (auto& e : p.notes)
+    if (e.step == step) e.offset = offset;
+}
+
+bool removeNote(Pattern& p, uint8_t step, uint8_t pitch) {
+  for (auto it = p.notes.begin(); it != p.notes.end(); ++it)
+    if (it->step == step && it->pitch == pitch) {
+      p.notes.erase(it);
+      return true;
+    }
+  return false;
+}
+
+bool repitchNote(Pattern& p, uint8_t step, uint8_t oldPitch, uint8_t newPitch) {
+  if (newPitch > 127 || hasNote(p, step, newPitch)) return false;
+  for (auto it = p.notes.begin(); it != p.notes.end(); ++it)
+    if (it->step == step && it->pitch == oldPitch) {
+      NoteEvent e = *it;
+      p.notes.erase(it);
+      e.pitch = newPitch;
+      return addNote(p, e);
+    }
+  return false;
+}
+
 bool doublePattern(Pattern& p) {
   if ((int)p.length * 2 > MAX_STEPS) return false;
   const uint8_t len = p.length;

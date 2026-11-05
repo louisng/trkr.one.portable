@@ -24,7 +24,7 @@ static char toastMsg[40] = "";
 static uint32_t toastUntil = 0;
 
 // Hold ` (menu key): overlay with screen jumps + transport toggles.
-// Tap ` alone: flip between the Live and Step screens.
+// Tap ` alone: cycle Step -> Tracker -> Live.
 // Hold fn + key: quick toggles (speaker, upper piano, Bluetooth, USB).
 static bool menuHeld = false;
 static bool menuUsed = false;
@@ -33,14 +33,14 @@ static constexpr uint32_t MENU_SHOW_DELAY_MS = 180;
 static uint64_t swallowed = 0;  // keys pressed inside the menu: ignore their release
 
 static bool fnHeld = false;
-static Screen* lastMain = nullptr;  // Live or Step: where a tap of ` returns to
+static Screen* lastMain = nullptr;  // Step / Tracker / Live: where a tap of ` returns to
 static int lastPlayStep = -2;
 
 static midi::LinkState lastBle, lastUsb;
 static bool adv = false;
 
 // Shortcut keys, looked up by key cap so they follow the layout table.
-static int8_t idxDigit[4];
+static int8_t idxDigit[5];
 static int8_t idxB = -1, idxU = -1, idxM = -1, idxP = -1, idxS = -1, idxT = -1;
 
 static int8_t findCap(const char* cap) {
@@ -62,7 +62,7 @@ void toast(const char* msg) {
 
 static void switchTo(Screen* s) {
   if (s == current) return;
-  if (s == liveScreen() || s == stepScreen()) lastMain = s;
+  if (s == liveScreen() || s == stepScreen() || s == trackerScreen()) lastMain = s;
   if (current) current->onLeave();
   if (!s->musicKeys()) player::releaseAll();
   current = s;
@@ -102,8 +102,9 @@ static void saveSong() {
 static void handleMenuKey(uint8_t idx) {
   if (idx == idxDigit[0]) switchTo(liveScreen());
   else if (idx == idxDigit[1]) switchTo(stepScreen());
-  else if (idx == idxDigit[2]) switchTo(setupScreen());
-  else if (idx == idxDigit[3]) switchTo(keyTestScreen());
+  else if (idx == idxDigit[2]) switchTo(trackerScreen());
+  else if (idx == idxDigit[3]) switchTo(setupScreen());
+  else if (idx == idxDigit[4]) switchTo(keyTestScreen());
   else if (idx == idxB) toggleBle();
   else if (idx == idxU) toggleUsb();
   else if (idx == idxM) toggleSpeaker();
@@ -174,9 +175,10 @@ static void handleEvent(const keys::Event& e) {
       menuSince = millis();
     } else {
       if (menuHeld && !menuUsed)
-        switchTo(current == liveScreen() ? stepScreen()
-                 : current == stepScreen() ? liveScreen()
-                                           : (lastMain ? lastMain : liveScreen()));
+        switchTo(current == stepScreen()      ? trackerScreen()
+                 : current == trackerScreen() ? liveScreen()
+                 : current == liveScreen()    ? stepScreen()
+                                              : (lastMain ? lastMain : stepScreen()));
       menuHeld = false;
     }
     return;
@@ -270,8 +272,8 @@ static void drawMenu() {
   canvas.drawString("MENU  (hold `, press a key)", x + 8, y + 6);
 
   canvas.setTextColor(col::TEXT);
-  canvas.drawString("1 Live     2 Step", x + 8, y + 20);
-  canvas.drawString("3 Setup    4 Key test", x + 8, y + 31);
+  canvas.drawString("1 Live   2 Step   3 Tracker", x + 8, y + 20);
+  canvas.drawString("4 Setup  5 Key test", x + 8, y + 31);
   canvas.drawString("s Save song", x + 8, y + 42);
 
   char buf[40];
@@ -317,7 +319,7 @@ void begin() {
   adv = M5.getBoard() == m5::board_t::board_M5CardputerADV;
   canvas.setColorDepth(16);
   canvas.createSprite(W, H);
-  for (uint8_t i = 0; i < 4; i++) {
+  for (uint8_t i = 0; i < 5; i++) {
     char cap[2] = {(char)('1' + i), 0};
     idxDigit[i] = findCap(cap);
   }

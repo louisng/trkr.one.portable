@@ -78,6 +78,11 @@ bool hasNote(const Pattern& p, uint8_t step, uint8_t pitch);
 // Change the length of every note on a step by `deltaTicks` (min 1 tick).
 void adjustStepLength(Pattern& p, uint8_t step, int deltaTicks);
 void setStepLength(Pattern& p, uint8_t step, uint16_t lenTicks);
+void setStepVelocity(Pattern& p, uint8_t step, uint8_t vel);
+void setStepOffset(Pattern& p, uint8_t step, int8_t offset);
+bool removeNote(Pattern& p, uint8_t step, uint8_t pitch);
+// Change one note's pitch, keeping its velocity / length / offset.
+bool repitchNote(Pattern& p, uint8_t step, uint8_t oldPitch, uint8_t newPitch);
 void setPatternLength(Pattern& p, uint8_t length);  // drops notes past the end
 // Double the pattern: length x2 with the notes copied into the new half.
 // Returns false if it would exceed MAX_STEPS.

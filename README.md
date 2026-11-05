@@ -8,11 +8,14 @@ original's GPIO key matrix and the ADV's TCA8418 chip) onto the same 4 × 14 key
 It grows out of [Ardutracker](https://github.com/louisng/ardutracker), a tracker and
 USB MIDI sequencer for the Arduboy.
 
-## Status: phase 2 (sequencer)
+## Status: phase 3 (tracker)
 
 - **Sequencer:** 8 tracks × 8 patterns, 1–128 steps (8 bars) per pattern, up to 4 notes per step.
   Every note keeps its velocity, length and a fine timing offset (the tracker in phase 3
   shows and edits all of it). Tracks can have different lengths and loop independently.
+- **Tracker screen**: all tracks side by side with every note's velocity, length and
+  timing offset, editable in place. It's the same data as the Step screen, so you can
+  sequence on one and fine-tune on the other.
 - **Step screen** for writing patterns note by note, **live recording** while playing
   (with optional snap-to-step and a metronome click)
 - Live play from the whole keyboard: piano, 13 chord buttons, 12 drum pads, or a second
@@ -46,8 +49,8 @@ Row 4  ct op alt z  x  c  v  b  n  m  ,  .  /  space     piano white keys
 | `f` / `l` | Step screen: note length for what you just entered (¼, ½, 1, 2, 3… steps); in the options panel, pattern length ± a bar |
 | `'` | Step screen: pattern & track options |
 | `del` | Step screen: clear the step under the cursor; on an empty step, insert **OFF** (stops held notes) |
-| `` ` `` tap | flip between the Live and Step screens |
-| `` ` `` hold | menu: `1` Live, `2` Step, `3` Setup, `4` Key test, `s` save song, `b` Bluetooth MIDI, `u` USB MIDI, `m` speaker, `p` top rows mode |
+| `` ` `` tap | cycle Step → Tracker → Live |
+| `` ` `` hold | menu: `1` Live, `2` Step, `3` Tracker, `4` Setup, `5` Key test, `s` save song, `b` Bluetooth MIDI, `u` USB MIDI, `m` speaker, `p` top rows mode |
 | `fn` + `m` / `p` / `b` / `u` / `s` | speaker on/off · top rows piano ↔ drums+chords · Bluetooth MIDI · USB MIDI · save song |
 | `fn` + `,` / `/` · `;` / `.` · `t` | tempo −1 / +1 · +10 / −10 · tap tempo |
 
@@ -68,6 +71,20 @@ classic tracker layout: `q w e r t y u i o p [ ] \` are white keys (C up to A) a
     type, mute, tempo.
   - Each track's pattern has its own length and loops on its own, so a 2-bar bass line runs
     against a 1-bar drum loop in time.
+- **Tracker:** one row per step (hex row numbers, bars highlighted), tracks side by side;
+  the view scrolls sideways to follow the cursor and follows the playhead while playing.
+  Each track shows `NOTE` (one column per chord note) `VL` (velocity, hex) `LEN` (steps)
+  `OF` (timing offset in ticks, 12 per step).
+  - `;`/`.` move between rows, `,`/`/` move between columns and on into the next track.
+  - Piano / chord / drum keys write at the cursor and move down a row (hold one key and
+    press more to stack a chord). On an existing chord, a single key replaces the note in
+    the column the cursor is on.
+  - `f`/`l` turn the value under the cursor down / up: note ±1 semitone, velocity ±1,
+    length through ¼ ½ 1 2 3… steps, offset ±1 tick. Hold `shift` for bigger jumps
+    (octave, ±16 velocity, ±1 bar of length).
+  - `del` clears the value under the cursor (velocity / length / offset go back to
+    defaults); on an empty row's note column it inserts OFF.
+  - `'` opens the same track options as the Step screen.
 - **Live:** shows what you play. `;`/`.` pick the track your keys play into, `,`/`/` change velocity.
 - **Setup:** MIDI transports, speaker, velocity, tempo, key & scale, piano mode,
   metronome (off / when recording / always), record quantize.
@@ -120,7 +137,7 @@ The device advertises as **Cardputer MIDI**.
 
 1. **Foundation** ✅: hardware layer, key layout, BLE + USB MIDI, live play, key test
 2. **Sequencer** ✅: clock, song/pattern data model, step sequencer, live recording with quantize
-3. **Tracker**: tracker view of the same data (edit every note's value, velocity, length, timing offset, effect)
+3. **Tracker** ✅: tracker view of the same data (every note's pitch, velocity, length, timing offset)
 4. **Synth engine**: 8-track internal synth + drum synth (speaker; headphones on ADV)
 5. **Song mode + storage**: pattern arranger, save/load on SD card, MIDI clock in/out
 
@@ -143,5 +160,5 @@ src/
   midi/BleMidi        BLE MIDI peripheral (NimBLE)
   audio/Monitor       speaker preview
   app/BootGuard       startup crash report
-  ui/                 screens (Step, Live, Setup, Key test), status bar, menu
+  ui/                 screens (Step, Tracker, Live, Setup, Key test), track options panel, status bar, menu
 ```
