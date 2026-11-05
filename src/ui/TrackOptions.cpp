@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 
+#include "../input/KeyInput.h"
 #include "../input/KeyLayout.h"
 #include "../play/LivePlayer.h"
 #include "../seq/Engine.h"
@@ -10,6 +11,8 @@
 namespace ui {
 
 using namespace seq;
+
+static constexpr uint8_t IDX_OPT = 3 * 14 + 1;
 
 uint16_t nextNoteLength(uint16_t len, bool longer, uint16_t maxLen) {
   const uint16_t T = TICKS_PER_STEP;
@@ -142,7 +145,13 @@ bool onAction(uint8_t a) {
       tr.pattern = (uint8_t)((tr.pattern + PATTERNS + dir) % PATTERNS);
       return true;
     case OPT_LENGTH: {
-      int len = tr.cur().length + d;
+      const int cur = tr.cur().length;
+      int len = cur + d;
+      if (keys::isDown(IDX_OPT) && (a == layout::ACT_LEFT || a == layout::ACT_RIGHT)) {
+        // opt + , / snaps to the previous / next whole bar: 17 -> 32, 40 -> 32.
+        len = dir > 0 ? (cur / 16 + 1) * 16 : ((cur - 1) / 16) * 16;
+        if (len < 16) len = cur < 16 ? cur : 16;  // nothing below one bar to snap to
+      }
       setPatternLength(tr.cur(), (uint8_t)(len < 1 ? 1 : len > MAX_STEPS ? MAX_STEPS : len));
       return true;
     }

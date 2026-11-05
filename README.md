@@ -76,7 +76,7 @@ classic tracker layout: `q w e r t y u i o p [ ] \` are white keys (C up to A) a
     cursor moves to the next step. Press more keys while still holding the first to stack
     them on the same step. `f`/`l` change the length of what you just entered.
   - *Drum tracks:* a 12-lane grid; drum pads toggle hits at the cursor.
-  - `'` opens options: pattern (1–8), length (1–128 steps; `f`/`l` jump a bar), **Double it**
+  - `'` opens options: pattern (1–8), length (1–128 steps; `f`/`l` ± a bar, `opt` + `,`/`/` snaps to the previous / next whole bar, e.g. 17 → 32), **Double it**
     (doubles the length and copies the notes into the new half), **Notes end** (after their
     length, or *hold* until the track's next note or an OFF step), MIDI channel, synth/drum
     type, mute, tempo.
