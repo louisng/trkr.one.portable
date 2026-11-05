@@ -5,6 +5,7 @@
 // Timing: a step is a 16th note, divided into TICKS_PER_STEP ticks.
 // Notes are stored sparsely per pattern, sorted by step.
 #include <Arduino.h>
+#include <FS.h>
 #include <stdint.h>
 
 #include <vector>
@@ -133,13 +134,21 @@ void setFx(Pattern& p, uint8_t step, uint8_t cmd, uint8_t val);  // cmd FX_NONE 
 
 // ── Persistence (flash) ──────────────────────────────────────────────────────
 static constexpr uint8_t SONG_NAME_MAX = 16;
+enum class Storage : uint8_t { Flash, Sd };
+
+// The mounted SD card, or nullptr if there's no card (Storage.cpp).
+fs::FS* sdFs();
+
+bool storageAvailable(Storage st);     // mounts on first use
 bool validSongName(const char* name);  // letters, digits, - _ and inner spaces
 const char* currentSongName();         // "" for a new, unsaved song
-bool songSave();                       // to the current name (false if none)
-bool songSaveAs(const char* name);
-bool songLoadNamed(const char* name);
-bool songDelete(const char* name);
+Storage currentSongStorage();
+bool songSave();                       // to the current name + storage (false if none)
+bool songSaveAs(const char* name, Storage st = Storage::Flash);
+bool songLoadNamed(const char* name, Storage st = Storage::Flash);
+bool songDelete(const char* name, Storage st = Storage::Flash);
+bool songCopy(const char* name, Storage from, Storage to);
 void songNew();
-std::vector<String> songList();        // sorted names
+std::vector<String> songList(Storage st = Storage::Flash);  // sorted names
 
 }  // namespace seq

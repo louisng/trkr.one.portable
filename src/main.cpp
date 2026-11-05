@@ -47,7 +47,9 @@ void setup() {
   settingsLoad();
   seq::songInit();
   // The song you had open last time (or the one carried over from phase 2).
-  if (!seq::songLoadNamed(settings.lastSong)) seq::songLoadNamed("untitled");
+  if (!seq::songLoadNamed(settings.lastSong,
+                          settings.lastSongOnSd ? seq::Storage::Sd : seq::Storage::Flash))
+    seq::songLoadNamed("untitled");
   seq::engineBegin();
 
   stage(ST_SPEAKER);

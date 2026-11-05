@@ -2,7 +2,9 @@
 //
 // List mode:   ; .  move     enter  load / pick the row's action
 //              s    save the current song over the selected one
+//              x    copy the selected song to the other storage (flash <-> SD)
 //              del  delete the selected song
+//              '    switch between the flash and SD card lists
 // Anything destructive asks for a second press.
 // Naming mode: type a name (shift = capitals), del = backspace,
 //              space = space, enter = save, tap ` = cancel.
@@ -21,11 +23,11 @@ namespace ui {
 using namespace seq;
 
 static constexpr uint8_t IDX_SHIFT = 2 * 14 + 1;
-static constexpr int ROW_H = 11, LIST_TOP = 18;
+static constexpr int ROW_H = 11, LIST_TOP = 30;
 static constexpr int VISIBLE = (H - LIST_TOP - 12) / ROW_H;
 static constexpr int FIXED_ROWS = 2;  // "new empty song", "save as new..."
 
-enum Pending : uint8_t { P_NONE, P_LOAD, P_DELETE, P_OVERWRITE, P_NEW, P_SAVE_EXISTING };
+enum Pending : uint8_t { P_NONE, P_LOAD, P_DELETE, P_OVERWRITE, P_NEW, P_SAVE_EXISTING, P_COPY };
 
 class SongsScreen : public Screen {
  public:
@@ -34,6 +36,8 @@ class SongsScreen : public Screen {
   bool spaceIsPlay() const override { return false; }  // the keyboard types names here
 
   void onEnter() override {
+    store = currentSongStorage();
+    if (store == Storage::Sd && !storageAvailable(Storage::Sd)) store = Storage::Flash;
     refresh();
     pending = P_NONE;
     if (!startNaming) naming = false;
@@ -70,6 +74,9 @@ class SongsScreen : public Screen {
       }
     } else if (ch == 's' && sel >= FIXED_ROWS) {
       confirm(P_OVERWRITE, "Press s again to save over");
+    } else if (ch == 'x' && sel >= FIXED_ROWS) {
+      confirm(P_COPY, store == Storage::Sd ? "Press x again to copy to flash"
+                                           : "Press x again to copy to SD");
     }
   }
 
@@ -90,12 +97,37 @@ class SongsScreen : public Screen {
       case layout::ACT_DELETE:
         if (sel >= FIXED_ROWS) confirm(P_DELETE, "Press del again to delete");
         break;
+      case layout::ACT_OPTIONS: {
+        Storage next = store == Storage::Flash ? Storage::Sd : Storage::Flash;
+        if (!storageAvailable(next)) {
+          toast("No SD card found");
+          break;
+        }
+        store = next;
+        pending = P_NONE;
+        sel = 1;
+        refresh();
+        break;
+      }
       default: break;
     }
   }
 
   void draw(M5Canvas& c) override {
     c.setFont(&fonts::Font0);
+    // Storage tabs.
+    const char* tabs[2] = {"FLASH", "SD CARD"};
+    for (uint8_t i = 0; i < 2; i++) {
+      const bool on = (i == 1) == (store == Storage::Sd);
+      const int x = 4 + i * 62;
+      c.fillRoundRect(x, 16, 58, 11, 3, on ? col::ACCENT : col::FAINT);
+      c.setTextDatum(middle_center);
+      c.setTextColor(on ? TFT_BLACK : col::DIM);
+      c.drawString(tabs[i], x + 29, 22);
+    }
+    c.setTextDatum(middle_right);
+    c.setTextColor(col::DIM);
+    c.drawString("' switches", W - 4, 22);
     if (sel < top) top = sel;
     if (sel >= top + VISIBLE) top = sel - VISIBLE + 1;
     const int total = FIXED_ROWS + (int)names.size();
@@ -111,7 +143,7 @@ class SongsScreen : public Screen {
         c.drawString("+ Save as new name...", 6, y);
       } else {
         const String& n = names[r - FIXED_ROWS];
-        bool isCur = n == currentSongName();
+        bool isCur = n == currentSongName() && store == currentSongStorage();
         c.setTextColor(isCur ? col::HELD : col::TEXT);
         c.drawString(n.c_str(), 6, y);
         if (isCur) {
@@ -134,13 +166,14 @@ class SongsScreen : public Screen {
     } else {
       pending = P_NONE;
       c.setTextColor(col::DIM);
-      c.drawString("enter: load  s: save over  del: delete", 4, H - 10);
+      c.drawString("enter:load s:save over x:copy del", 4, H - 10);
     }
     if (naming) drawNaming(c);
   }
 
  private:
   std::vector<String> names;
+  Storage store = Storage::Flash;  // which list is showing
   int sel = 1, top = 0;
   bool naming = false, startNaming = false;
   char name[SONG_NAME_MAX + 1] = "";
@@ -150,12 +183,13 @@ class SongsScreen : public Screen {
   char pendingMsg[40] = "";
 
   void refresh() {
-    names = songList();
+    names = songList(store);
     const int total = FIXED_ROWS + (int)names.size();
     if (sel >= total) sel = total - 1;
     // Start on the open song if there is one.
-    for (size_t i = 0; i < names.size(); i++)
-      if (names[i] == currentSongName()) sel = FIXED_ROWS + (int)i;
+    if (store == currentSongStorage())
+      for (size_t i = 0; i < names.size(); i++)
+        if (names[i] == currentSongName()) sel = FIXED_ROWS + (int)i;
   }
 
   const char* selName() { return sel >= FIXED_ROWS ? names[sel - FIXED_ROWS].c_str() : ""; }
@@ -176,6 +210,7 @@ class SongsScreen : public Screen {
   void remember(const char* n) {
     strncpy(settings.lastSong, n, sizeof(settings.lastSong) - 1);
     settings.lastSong[sizeof(settings.lastSong) - 1] = 0;
+    settings.lastSongOnSd = store == Storage::Sd;
     settingsSave();
   }
 
@@ -196,7 +231,7 @@ class SongsScreen : public Screen {
       case P_LOAD: {
         String n = selName();
         stopEverything();
-        if (songLoadNamed(n.c_str())) {
+        if (songLoadNamed(n.c_str(), store)) {
           remember(n.c_str());
           snprintf(msg, sizeof(msg), "Loaded %s", n.c_str());
         } else {
@@ -207,7 +242,7 @@ class SongsScreen : public Screen {
       }
       case P_OVERWRITE: {
         String n = selName();
-        bool ok = songSaveAs(n.c_str());
+        bool ok = songSaveAs(n.c_str(), store);
         if (ok) remember(n.c_str());
         snprintf(msg, sizeof(msg), ok ? "Saved as %s" : "Save failed", n.c_str());
         toast(msg);
@@ -215,9 +250,19 @@ class SongsScreen : public Screen {
       }
       case P_DELETE: {
         String n = selName();
-        snprintf(msg, sizeof(msg), songDelete(n.c_str()) ? "Deleted %s" : "Couldn't delete %s",
+        snprintf(msg, sizeof(msg), songDelete(n.c_str(), store) ? "Deleted %s" : "Couldn't delete %s",
                  n.c_str());
-        if (strcmp(settings.lastSong, n.c_str()) == 0) remember("");
+        if (strcmp(settings.lastSong, n.c_str()) == 0 && settings.lastSongOnSd == (store == Storage::Sd))
+          remember("");
+        toast(msg);
+        break;
+      }
+      case P_COPY: {
+        String n = selName();
+        Storage to = store == Storage::Sd ? Storage::Flash : Storage::Sd;
+        bool ok = songCopy(n.c_str(), store, to);
+        snprintf(msg, sizeof(msg), ok ? "Copied %s to %s" : "Copy failed (%s)", n.c_str(),
+                 to == Storage::Sd ? "SD" : "flash");
         toast(msg);
         break;
       }
@@ -250,7 +295,7 @@ class SongsScreen : public Screen {
         }
         bool exists = false;
         for (auto& s : names) exists |= s == name;
-        if (exists && strcmp(name, currentSongName()) != 0) {
+        if (exists && (strcmp(name, currentSongName()) != 0 || store != currentSongStorage())) {
           confirm(P_SAVE_EXISTING, "Name taken: enter again to replace");
           return;
         }
@@ -263,7 +308,7 @@ class SongsScreen : public Screen {
 
   void saveNamed() {
     char msg[40];
-    bool ok = songSaveAs(name);
+    bool ok = songSaveAs(name, store);
     if (ok) remember(name);
     snprintf(msg, sizeof(msg), ok ? "Saved as %s" : "Save failed", name);
     toast(msg);
@@ -278,7 +323,7 @@ class SongsScreen : public Screen {
     c.setFont(&fonts::Font0);
     c.setTextDatum(top_left);
     c.setTextColor(col::ACCENT);
-    c.drawString("SAVE AS", x + 8, y + 6);
+    c.drawString(store == Storage::Sd ? "SAVE AS (SD card)" : "SAVE AS (flash)", x + 8, y + 6);
     c.fillRect(x + 8, y + 20, w - 16, 16, col::BG);
     c.setFont(&fonts::FreeSansBold9pt7b);
     c.setTextColor(col::HELD);

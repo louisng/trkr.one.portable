@@ -228,30 +228,49 @@ void setPatternLength(Pattern& p, uint8_t length) {
 }
 
 // ── Persistence ──────────────────────────────────────────────────────────────
-// Songs live in /songs/<name>.cms on the LittleFS partition.
+// Songs live in /songs/<name>.cms on the flash (LittleFS) partition, or in
+// /cardputer-midi/songs/<name>.cms on the SD card.
 // File layout (little endian):
 //   "CMSG" u8 version  u16 bpm
 //   per track: name[6] kind channel mute pattern [hold: v2+]
 //     per pattern: length u16 count, then count x {step offset pitch vel u16 len}
 //                  [v3+: u16 fxCount, then fxCount x {step cmd val}]
 //   [v4+: scenes SCENES x TRACKS bytes, u8 arrangeCount, arrange bytes, u8 songMode]
-static const char* SONG_DIR = "/songs";
 static constexpr uint8_t SONG_VERSION = 4;
-static bool fsReady = false;
 static char currentName[SONG_NAME_MAX + 1] = "";
+static Storage currentStore = Storage::Flash;
 
-static bool ensureFs() {
-  if (fsReady) return true;
-  fsReady = LittleFS.begin(true);  // formats the partition on first use
-  if (!fsReady) return false;
-  if (!LittleFS.exists(SONG_DIR)) LittleFS.mkdir(SONG_DIR);
-  // Phase 2 kept a single song at /song.cms: move it into the song list.
-  if (LittleFS.exists("/song.cms") && !LittleFS.exists("/songs/untitled.cms"))
-    LittleFS.rename("/song.cms", "/songs/untitled.cms");
-  return true;
+// Songs folder on each storage; the SD folder is easy to find on a computer.
+static const char* dirFor(Storage st) { return st == Storage::Sd ? "/cardputer-midi/songs" : "/songs"; }
+
+static bool flashReady = false;
+
+// Mounts the storage (and makes the songs folder) on first use.
+static fs::FS* fsFor(Storage st) {
+  if (st == Storage::Sd) {
+    fs::FS* sd = sdFs();
+    if (!sd) return nullptr;
+    if (!sd->exists("/cardputer-midi")) sd->mkdir("/cardputer-midi");
+    if (!sd->exists(dirFor(st))) sd->mkdir(dirFor(st));
+    return sd;
+  }
+  if (!flashReady) {
+    flashReady = LittleFS.begin(true);  // formats the partition on first use
+    if (!flashReady) return nullptr;
+    if (!LittleFS.exists("/songs")) LittleFS.mkdir("/songs");
+    // Phase 2 kept a single song at /song.cms: move it into the song list.
+    if (LittleFS.exists("/song.cms") && !LittleFS.exists("/songs/untitled.cms"))
+      LittleFS.rename("/song.cms", "/songs/untitled.cms");
+  }
+  return &LittleFS;
 }
 
-static String pathFor(const char* name) { return String(SONG_DIR) + "/" + name + ".cms"; }
+bool storageAvailable(Storage st) { return fsFor(st) != nullptr; }
+Storage currentSongStorage() { return currentStore; }
+
+static String pathFor(Storage st, const char* name) {
+  return String(dirFor(st)) + "/" + name + ".cms";
+}
 
 bool validSongName(const char* name) {
   size_t n = strlen(name);
@@ -265,9 +284,10 @@ bool validSongName(const char* name) {
 
 const char* currentSongName() { return currentName; }
 
-static void setCurrentName(const char* name) {
+static void setCurrent(const char* name, Storage st) {
   strncpy(currentName, name, SONG_NAME_MAX);
   currentName[SONG_NAME_MAX] = 0;
+  currentStore = st;
 }
 
 static bool writeSong(File& f) {
@@ -371,29 +391,32 @@ static bool readSong(File& f) {
   return true;
 }
 
-bool songSaveAs(const char* name) {
-  if (!validSongName(name) || !ensureFs()) return false;
-  String tmp = String(SONG_DIR) + "/.tmp";
-  File f = LittleFS.open(tmp, "w");
+bool songSaveAs(const char* name, Storage st) {
+  fs::FS* fsys = fsFor(st);
+  if (!validSongName(name) || !fsys) return false;
+  // Write to a temp file first so a failed save never destroys the old one.
+  String tmp = String(dirFor(st)) + "/_tmp.cms_";
+  File f = fsys->open(tmp, "w");
   if (!f) return false;
   bool ok = writeSong(f);
   f.close();
   if (!ok) {
-    LittleFS.remove(tmp);
+    fsys->remove(tmp);
     return false;
   }
-  String path = pathFor(name);
-  LittleFS.remove(path);
-  if (!LittleFS.rename(tmp, path)) return false;
-  setCurrentName(name);
+  String path = pathFor(st, name);
+  fsys->remove(path);
+  if (!fsys->rename(tmp, path)) return false;
+  setCurrent(name, st);
   return true;
 }
 
-bool songSave() { return currentName[0] && songSaveAs(currentName); }
+bool songSave() { return currentName[0] && songSaveAs(currentName, currentStore); }
 
-bool songLoadNamed(const char* name) {
-  if (!validSongName(name) || !ensureFs()) return false;
-  File f = LittleFS.open(pathFor(name), "r");
+bool songLoadNamed(const char* name, Storage st) {
+  fs::FS* fsys = fsFor(st);
+  if (!validSongName(name) || !fsys) return false;
+  File f = fsys->open(pathFor(st, name), "r");
   if (!f) return false;
   bool ok = readSong(f);
   f.close();
@@ -401,15 +424,49 @@ bool songLoadNamed(const char* name) {
     songInit();  // never leave a half-loaded song behind
     return false;
   }
-  setCurrentName(name);
+  setCurrent(name, st);
   return true;
 }
 
-bool songDelete(const char* name) {
-  if (!validSongName(name) || !ensureFs()) return false;
-  bool ok = LittleFS.remove(pathFor(name));
-  if (ok && strcmp(name, currentName) == 0) currentName[0] = 0;
+bool songDelete(const char* name, Storage st) {
+  fs::FS* fsys = fsFor(st);
+  if (!validSongName(name) || !fsys) return false;
+  bool ok = fsys->remove(pathFor(st, name));
+  if (ok && st == currentStore && strcmp(name, currentName) == 0) currentName[0] = 0;
   return ok;
+}
+
+bool songCopy(const char* name, Storage from, Storage to) {
+  fs::FS* src = fsFor(from);
+  fs::FS* dst = fsFor(to);
+  if (!validSongName(name) || !src || !dst || from == to) return false;
+  File in = src->open(pathFor(from, name), "r");
+  if (!in) return false;
+  String tmp = String(dirFor(to)) + "/_tmp.cms_";
+  File out = dst->open(tmp, "w");
+  if (!out) {
+    in.close();
+    return false;
+  }
+  uint8_t buf[256];
+  bool ok = true;
+  for (;;) {
+    int n = in.read(buf, sizeof(buf));
+    if (n <= 0) break;
+    if (out.write(buf, (size_t)n) != (size_t)n) {
+      ok = false;
+      break;
+    }
+  }
+  in.close();
+  out.close();
+  if (!ok) {
+    dst->remove(tmp);
+    return false;
+  }
+  String path = pathFor(to, name);
+  dst->remove(path);
+  return dst->rename(tmp, path);
 }
 
 void songNew() {
@@ -417,10 +474,11 @@ void songNew() {
   currentName[0] = 0;
 }
 
-std::vector<String> songList() {
+std::vector<String> songList(Storage st) {
   std::vector<String> names;
-  if (!ensureFs()) return names;
-  File dir = LittleFS.open(SONG_DIR);
+  fs::FS* fsys = fsFor(st);
+  if (!fsys) return names;
+  File dir = fsys->open(dirFor(st));
   if (!dir) return names;
   for (File f = dir.openNextFile(); f; f = dir.openNextFile()) {
     String n = f.name();

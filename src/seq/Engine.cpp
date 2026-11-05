@@ -259,6 +259,9 @@ static void processTick(uint32_t tick) {
     }
   }
 
+  // MIDI clock: 24 per quarter note, i.e. every other tick (we run at 48).
+  if (settings.clockOut && tick % (TICKS_PER_STEP * 4 / 24) == 0) midi::realtime(midi::RT_CLOCK);
+
   // Metronome on each beat (accent on the bar).
   const uint32_t beat = TICKS_PER_STEP * 4;
   if (tick % beat == 0 && (settings.metronome == 2 || (settings.metronome == 1 && recording())))
@@ -322,6 +325,10 @@ void play() {
   origin = 0;
   songActive = false;  // (re)enters the arrangement on the first tick if song mode is on
   for (auto& s : silent) s = false;
+  if (settings.clockOut) {
+    midi::realtime(midi::RT_START);  // the first clock follows on tick 0
+    midi::update();
+  }
   isPlaying = true;
 }
 
@@ -350,6 +357,7 @@ void stop() {
     if (a.used) noteOffActive(a);
   for (auto& r : recHeld) r.used = false;
   for (auto& q : pending) q.used = false;
+  if (settings.clockOut) midi::realtime(midi::RT_STOP);
   midi::update();
 }
 

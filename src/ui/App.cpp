@@ -116,6 +116,7 @@ static void saveSong() {
   if (ok) {
     strncpy(settings.lastSong, seq::currentSongName(), sizeof(settings.lastSong) - 1);
     settings.lastSong[sizeof(settings.lastSong) - 1] = 0;
+    settings.lastSongOnSd = seq::currentSongStorage() == seq::Storage::Sd;
   }
   char msg[40];
   snprintf(msg, sizeof(msg), ok ? "Saved %s" : "Save failed", seq::currentSongName());

@@ -16,6 +16,8 @@ struct Settings {
   bool quantize = true;    // snap live-recorded notes to steps
   bool upperPiano = false; // top two rows = second piano octave (fn+p)
   char lastSong[17] = "";  // song loaded at power-on
+  bool clockOut = true;    // send MIDI clock + start/stop while playing
+  bool lastSongOnSd = false;  // lastSong lives on the SD card
   // New fields go at the end: older saved settings still load (the new
   // fields keep their defaults).
 };

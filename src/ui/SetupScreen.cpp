@@ -25,13 +25,16 @@ enum Item : uint8_t {
   IT_PIANO_MODE,
   IT_METRONOME,
   IT_QUANTIZE,
+  IT_CLOCK,
   IT_COUNT
 };
 
 static const char* const LABELS[IT_COUNT] = {
     "Bluetooth MIDI", "USB MIDI", "Speaker",    "Speaker volume", "Velocity", "Tempo",
     "Key",            "Scale",    "Piano keys", "Metronome",      "Rec quantize",
+    "MIDI clock out",
 };
+static constexpr int VISIBLE = 10;
 
 static const char* linkText(midi::LinkState s) {
   switch (s) {
@@ -60,9 +63,11 @@ class SetupScreen : public Screen {
 
   void draw(M5Canvas& c) override {
     const int rowH = 10, top = STATUS_H + 2;
+    if (sel < first) first = sel;
+    if (sel >= first + VISIBLE) first = sel - VISIBLE + 1;
     c.setFont(&fonts::Font0);
-    for (uint8_t i = 0; i < IT_COUNT; i++) {
-      int y = top + i * rowH;
+    for (uint8_t i = first; i < IT_COUNT && i < first + VISIBLE; i++) {
+      int y = top + (i - first) * rowH;
       if (i == sel) c.fillRect(0, y, W, rowH, col::SELECT);
       c.setTextDatum(top_left);
       c.setTextColor(i == sel ? col::TEXT : col::DIM);
@@ -76,10 +81,14 @@ class SetupScreen : public Screen {
     c.setTextDatum(top_left);
     c.setTextColor(col::FAINT);
     c.drawString(isAdv() ? "Cardputer ADV" : "Cardputer", 6, H - 9);
+    c.setTextDatum(top_right);
+    char pos[12];
+    snprintf(pos, sizeof(pos), "%d/%d", sel + 1, IT_COUNT);
+    c.drawString(pos, W - 6, H - 9);
   }
 
  private:
-  uint8_t sel = 0;
+  uint8_t sel = 0, first = 0;
 
   void value(Item it, char* out, size_t n) {
     switch (it) {
@@ -91,6 +100,7 @@ class SetupScreen : public Screen {
       case IT_BPM: snprintf(out, n, "%d bpm", seq::song.bpm); break;
       case IT_METRONOME: snprintf(out, n, "%s", METRO[settings.metronome % 3]); break;
       case IT_QUANTIZE: snprintf(out, n, "%s", settings.quantize ? "on (snap to steps)" : "off"); break;
+      case IT_CLOCK: snprintf(out, n, "%s", settings.clockOut ? "ON (start/stop too)" : "off"); break;
       case IT_ROOT: snprintf(out, n, "%s", theory::noteName(settings.root)); break;
       case IT_SCALE: snprintf(out, n, "%s", theory::scaleName(settings.scale)); break;
       case IT_PIANO_MODE:
@@ -132,6 +142,7 @@ class SetupScreen : public Screen {
       }
       case IT_METRONOME: settings.metronome = (uint8_t)((settings.metronome + 3 + d) % 3); break;
       case IT_QUANTIZE: settings.quantize = !settings.quantize; break;
+      case IT_CLOCK: settings.clockOut = !settings.clockOut; break;
       case IT_ROOT: settings.root = (uint8_t)((settings.root + 12 + d) % 12); break;
       case IT_SCALE:
         settings.scale = (uint8_t)((settings.scale + theory::SCALE_COUNT + d) % theory::SCALE_COUNT);

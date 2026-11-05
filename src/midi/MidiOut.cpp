@@ -113,6 +113,16 @@ void programChange(uint8_t channel, uint8_t program) {
 #endif
 }
 
+void realtime(uint8_t byte) {
+  blemidi::send1(byte);
+#if HAS_USB_MIDI
+  if (usbOn && usbMounted()) {
+    midiEventPacket_t p = {0x0F, byte, 0, 0};  // CIN 0xF: single byte
+    usbMidi.writePacket(&p);
+  }
+#endif
+}
+
 void allNotesOff() {
   for (uint8_t ch = 1; ch <= 16; ch++) controlChange(ch, 123, 0);
   blemidi::flush();

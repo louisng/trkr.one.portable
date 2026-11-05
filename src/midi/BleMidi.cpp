@@ -92,6 +92,8 @@ static void sendBytes(const uint8_t* msg, uint8_t n) {
   for (uint8_t i = 0; i < n; i++) pkt[pktLen++] = i == 0 ? msg[0] : (msg[i] & 0x7F);
 }
 
+void send1(uint8_t status) { sendBytes(&status, 1); }
+
 void send2(uint8_t status, uint8_t d1) {
   uint8_t m[2] = {status, d1};
   sendBytes(m, 2);
