@@ -7,7 +7,7 @@
 #include <math.h>
 
 #include "../app/Settings.h"
-#include "../audio/Monitor.h"
+#include "../audio/Synth.h"
 #include "../input/KeyLayout.h"
 #include "../midi/MidiOut.h"
 #include "../play/LivePlayer.h"
@@ -86,7 +86,7 @@ uint8_t liveDrumTrack() {
 // ── Playback ─────────────────────────────────────────────────────────────────
 static void noteOffActive(Active& a) {
   midi::noteOff(a.channel, a.pitch);
-  if (!a.drum) monitor::noteOff(a.pitch);
+  if (!a.drum) synth::noteOff(a.track, a.pitch);
   a.used = false;
 }
 
@@ -118,9 +118,9 @@ static void startNote(uint8_t t, const Track& tr, const NoteEvent& e, uint32_t t
   midi::noteOn(tr.channel, e.pitch, e.vel);
   if (drum) {
     int pad = player::drumPadForNote(e.pitch);
-    monitor::drum(pad >= 0 ? (uint8_t)pad : 0);
+    if (pad >= 0) synth::drum(t, (uint8_t)pad, e.vel);
   } else {
-    monitor::noteOn(e.pitch);
+    synth::noteOn(t, e.pitch, e.vel);
   }
   const bool held = tr.hold && !drum && !forceShort;
   *slot = {true, held, t, tr.channel, e.pitch, drum, tick + (e.len ? e.len : 1)};
@@ -265,7 +265,7 @@ static void processTick(uint32_t tick) {
   // Metronome on each beat (accent on the bar).
   const uint32_t beat = TICKS_PER_STEP * 4;
   if (tick % beat == 0 && (settings.metronome == 2 || (settings.metronome == 1 && recording())))
-    monitor::click(tick % (beat * 4) == 0);
+    synth::click(tick % (beat * 4) == 0);
 }
 
 // ── Tap tempo ────────────────────────────────────────────────────────────────

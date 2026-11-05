@@ -56,6 +56,7 @@ Screen* trackerScreen();
 Screen* songsScreen();
 Screen* scenesScreen();
 Screen* arrangeScreen();
+Screen* synthScreen();
 void songsStartSaveAs();  // call before switching to songsScreen()
 Screen* setupScreen();
 Screen* keyTestScreen();

@@ -64,6 +64,26 @@ struct Pattern {
 
 enum class TrackKind : uint8_t { Synth, Drum };
 
+// The built-in synth's sound for a track. All values 0-127 unless noted.
+// Drum tracks use sound, volume, cutoff (tone), decay and octave (pitch,
+// in semitones) to shape the drum kit.
+enum Wave : uint8_t { WAVE_SAW, WAVE_SQUARE, WAVE_PULSE, WAVE_TRIANGLE, WAVE_SINE, WAVE_NOISE, WAVE_COUNT };
+
+struct Instrument {
+  uint8_t sound;      // 1 = play on the built-in synth, 0 = MIDI only
+  uint8_t volume;
+  uint8_t wave;       // Wave
+  int8_t octave;      // -2..+2 (drums: pitch -12..+12 semitones)
+  uint8_t detune;     // second oscillator detune, 0 = single oscillator
+  uint8_t attack, decay, sustain, release;
+  uint8_t cutoff, resonance, envMod;  // filter, and how far the envelope opens it
+};
+
+static constexpr uint8_t PRESET_COUNT = 8;
+const char* presetName(uint8_t preset);
+void applyPreset(Instrument& in, uint8_t preset);
+void defaultInstrument(Instrument& in, uint8_t track, bool drum);
+
 struct Track {
   char name[6];
   TrackKind kind;
@@ -71,6 +91,7 @@ struct Track {
   bool mute;
   bool hold;        // notes ring until the track's next note / OFF, ignoring length
   uint8_t pattern;  // pattern currently playing / being edited
+  Instrument inst;  // built-in synth sound
   Pattern patterns[PATTERNS];
 
   Pattern& cur() { return patterns[pattern]; }

@@ -4,7 +4,7 @@
 
 #include "app/BootGuard.h"
 #include "app/Settings.h"
-#include "audio/Monitor.h"
+#include "audio/Synth.h"
 #include "input/KeyInput.h"
 #include "midi/MidiOut.h"
 #include "play/LivePlayer.h"
@@ -54,9 +54,9 @@ void setup() {
 
   stage(ST_SPEAKER);
   if (skipped(ST_SPEAKER)) settings.speaker = false;
-  monitor::begin();
-  monitor::setVolume(settings.volume);
-  monitor::setEnabled(settings.speaker);
+  synth::begin();
+  synth::setVolume(settings.volume);
+  synth::setEnabled(settings.speaker);
 
   stage(ST_MIDI_USB);
   midi::beginUsb(settings.usbMidi && !skipped(ST_MIDI_USB));

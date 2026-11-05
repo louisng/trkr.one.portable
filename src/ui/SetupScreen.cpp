@@ -3,7 +3,7 @@
 #include <stdio.h>
 
 #include "../app/Settings.h"
-#include "../audio/Monitor.h"
+#include "../audio/Synth.h"
 #include "../input/KeyLayout.h"
 #include "../midi/MidiOut.h"
 #include "../music/Theory.h"
@@ -122,12 +122,12 @@ class SetupScreen : public Screen {
         break;
       case IT_SPEAKER:
         settings.speaker = !settings.speaker;
-        monitor::setEnabled(settings.speaker);
+        synth::setEnabled(settings.speaker);
         break;
       case IT_VOLUME: {
         int v = settings.volume + d * 16;
         settings.volume = (uint8_t)(v < 0 ? 0 : v > 255 ? 255 : v);
-        monitor::setVolume(settings.volume);
+        synth::setVolume(settings.volume);
         break;
       }
       case IT_VELOCITY: {

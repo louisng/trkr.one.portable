@@ -2,7 +2,7 @@
 #include <string.h>
 
 #include "../app/Settings.h"
-#include "../audio/Monitor.h"
+#include "../audio/Synth.h"
 #include "../input/KeyInput.h"
 #include "../input/KeyLayout.h"
 #include "../midi/MidiOut.h"
@@ -51,7 +51,7 @@ static midi::LinkState lastBle, lastUsb;
 static bool adv = false;
 
 // Shortcut keys, looked up by key cap so they follow the layout table.
-static int8_t idxDigit[8];
+static int8_t idxDigit[9];
 static int8_t idxB = -1, idxU = -1, idxM = -1, idxP = -1, idxS = -1, idxT = -1;
 
 static int8_t findCap(const char* cap) {
@@ -94,7 +94,7 @@ static void toggleUsb() {
 }
 static void toggleSpeaker() {
   settings.speaker = !settings.speaker;
-  monitor::setEnabled(settings.speaker);
+  synth::setEnabled(settings.speaker);
   toast(settings.speaker ? "Speaker on" : "Speaker off");
 }
 
@@ -132,6 +132,7 @@ static void handleMenuKey(uint8_t idx) {
   else if (idx == idxDigit[5]) switchTo(songsScreen());
   else if (idx == idxDigit[6]) switchTo(setupScreen());
   else if (idx == idxDigit[7]) switchTo(keyTestScreen());
+  else if (idx == idxDigit[8]) switchTo(synthScreen());
   else if (idx == idxB) toggleBle();
   else if (idx == idxU) toggleUsb();
   else if (idx == idxM) toggleSpeaker();
@@ -319,24 +320,26 @@ static void drawMenu() {
   canvas.setTextColor(col::ACCENT);
   canvas.drawString("MENU  (hold `, press a key)", x + 8, y + 6);
 
+  // Screens, 3 per row.
+  static const char* const SCREENS[9] = {"1 Live",  "2 Step",  "3 Tracker", "4 Scenes", "5 Arrange",
+                                         "6 Songs", "7 Setup", "8 Keys",    "9 Synth"};
   canvas.setTextColor(col::TEXT);
-  canvas.drawString("1 Live  2 Step  3 Tracker  4 Scenes", x + 8, y + 20);
-  canvas.drawString("5 Arrange  6 Songs  7 Setup  8 Keys", x + 8, y + 31);
-  char sv[40];
-  snprintf(sv, sizeof(sv), "s Save %s", seq::currentSongName()[0] ? seq::currentSongName() : "as...");
-  canvas.drawString(sv, x + 8, y + 42);
+  for (int i = 0; i < 9; i++) canvas.drawString(SCREENS[i], x + 8 + (i % 3) * 68, y + 19 + (i / 3) * 10);
 
   char buf[40];
-  snprintf(buf, sizeof(buf), "b Bluetooth MIDI: %s", settings.bleMidi ? "ON" : "off");
-  canvas.drawString(buf, x + 8, y + 56);
-  snprintf(buf, sizeof(buf), "u USB MIDI: %s", settings.usbMidi ? "ON" : "off");
-  canvas.drawString(buf, x + 8, y + 67);
-  snprintf(buf, sizeof(buf), "m Speaker: %s", settings.speaker ? "ON" : "off");
-  canvas.drawString(buf, x + 8, y + 78);
-  snprintf(buf, sizeof(buf), "p Top rows: %s", settings.upperPiano ? "piano" : "drums+chords");
-  canvas.drawString(buf, x + 8, y + 89);
+  snprintf(buf, sizeof(buf), "s Save %s", seq::currentSongName()[0] ? seq::currentSongName() : "as...");
+  canvas.drawString(buf, x + 8, y + 52);
+  snprintf(buf, sizeof(buf), "b BLE: %s", settings.bleMidi ? "ON" : "off");
+  canvas.drawString(buf, x + 8, y + 64);
+  snprintf(buf, sizeof(buf), "u USB: %s", settings.usbMidi ? "ON" : "off");
+  canvas.drawString(buf, x + 110, y + 64);
+  snprintf(buf, sizeof(buf), "m Sound: %s", settings.speaker ? "ON" : "off");
+  canvas.drawString(buf, x + 8, y + 75);
+  snprintf(buf, sizeof(buf), "p Top: %s", settings.upperPiano ? "piano" : "drum+chd");
+  canvas.drawString(buf, x + 110, y + 75);
   canvas.setTextColor(col::DIM);
-  canvas.drawString("fn+m/p/b/u/s, fn+arrows/t = tempo", x + 8, y + 101);
+  canvas.drawString("fn + m p b u s: same", x + 8, y + 90);
+  canvas.drawString("fn + arrows / t: tempo", x + 8, y + 100);
 }
 
 static void drawToast() {
@@ -369,7 +372,7 @@ void begin() {
   adv = M5.getBoard() == m5::board_t::board_M5CardputerADV;
   canvas.setColorDepth(16);
   canvas.createSprite(W, H);
-  for (uint8_t i = 0; i < 8; i++) {
+  for (uint8_t i = 0; i < 9; i++) {
     char cap[2] = {(char)('1' + i), 0};
     idxDigit[i] = findCap(cap);
   }

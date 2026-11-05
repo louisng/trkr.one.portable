@@ -8,7 +8,7 @@ original's GPIO key matrix and the ADV's TCA8418 chip) onto the same 4 × 14 key
 It grows out of [Ardutracker](https://github.com/louisng/ardutracker), a tracker and
 USB MIDI sequencer for the Arduboy.
 
-## Status: phase 3 (tracker)
+## Status: phases 1–5 done
 
 - **Sequencer:** 8 tracks × 8 patterns, 1–128 steps (8 bars) per pattern, up to 4 notes per step.
   Every note keeps its velocity, length and a fine timing offset (the tracker in phase 3
@@ -21,7 +21,12 @@ USB MIDI sequencer for the Arduboy.
 - Live play from the whole keyboard: piano, 13 chord buttons, 12 drum pads, or a second
   piano octave on the top rows
 - Bluetooth LE MIDI and USB MIDI, each switchable on/off at any time
-- Simple speaker preview (switch off with fn+m when you only want MIDI out)
+- **Built-in synth**: 10-voice polyphonic synth (saw / square / pulse / triangle / sine /
+  noise, detuned second oscillator, resonant filter with envelope, ADSR) and a synthesized
+  12-piece drum kit, on the speaker and the ADV's headphone jack. Each track has its own
+  sound; fn+m turns all built-in sound off when you only want MIDI out
+- **MIDI clock out**: Start / clock / Stop so the M8 or a DAW follows the tempo
+- **SD card**: keep songs on the card as well as in flash, and copy between them
 - **Scenes + arrangement** (song mode): scenes 1–99 say which pattern each track plays;
   the arrangement lists scenes in play order (e.g. `1 1 4 3 2 1 1 6`)
 - **Named songs**: save as many as fit (about 1.5 MB), with names typed on the keyboard;
@@ -56,7 +61,7 @@ Row 4  ct op alt z  x  c  v  b  n  m  ,  .  /  space     piano white keys
 | `'` | Step screen: pattern & track options |
 | `del` | Step screen: clear the step under the cursor; on an empty step, insert **OFF** (stops held notes) |
 | `` ` `` tap | cycle Step → Tracker → Live |
-| `` ` `` hold | menu: `1` Live, `2` Step, `3` Tracker, `4` Scenes, `5` Arrange, `6` Songs, `7` Setup, `8` Key test, `s` save song, `b` Bluetooth MIDI, `u` USB MIDI, `m` speaker, `p` top rows mode |
+| `` ` `` hold | menu: `1` Live, `2` Step, `3` Tracker, `4` Scenes, `5` Arrange, `6` Songs, `7` Setup, `8` Key test, `9` Synth, `s` save song, `b` Bluetooth MIDI, `u` USB MIDI, `m` speaker, `p` top rows mode |
 | `fn` + `m` / `p` / `b` / `u` / `s` | speaker on/off · top rows piano ↔ drums+chords · Bluetooth MIDI · USB MIDI · save song (asks for a name the first time) |
 | `fn` + `,` / `/` · `;` / `.` · `t` | tempo −1 / +1 · +10 / −10 · tap tempo |
 
@@ -125,15 +130,30 @@ classic tracker layout: `q w e r t y u i o p [ ] \` are white keys (C up to A) a
   - Each row shows the scene's patterns per track and its length in steps.
   - The Step and Tracker screens follow the patterns of the scene that's playing, so you
     edit what you hear. Pattern mode (song mode off) just loops each track's pattern.
+- **Synth:** the built-in sound of the selected track. `;`/`.` pick a setting, `,`/`/`
+  change it (`shift` = ×16), `f`/`l` switch track. The keyboard keeps playing, so you hear
+  every change. The graph shows the envelope shape.
+  - *Synth tracks:* Preset (Bass, Pad, Lead, Pluck, Keys, Bell, Organ, Sub: a starting
+    point you can then tweak), Sound (on / off = MIDI only), Volume, Wave, Octave, Detune
+    (adds a second, slightly detuned oscillator), Attack / Decay / Sustain / Release,
+    Cutoff, Resonance, Filter env (how far the envelope opens the filter).
+  - *Drum tracks:* Sound, Volume, Tone (brightness), Decay (shorter / longer), Pitch
+    (±12 semitones) for the whole kit.
+  - Instruments are saved with the song. Older songs get sensible defaults per track.
 - **Songs:** the saved songs, sorted by name, with the open one in yellow.
   `;`/`.` pick, `enter` loads, `s` saves the open song over the selected one, `del` deletes;
-  each asks for a second press to confirm. *Save as new name...* lets you type a name
+  each asks for a second press to confirm. `'` switches between the **FLASH** and
+  **SD CARD** lists, and `x` copies the selected song to the other one. On the card, songs
+  live in `/cardputer-midi/songs/*.cms`. Quick save goes back to wherever the open song
+  came from. *Save as new name...* lets you type a name
   (letters, digits, `-`, space; `shift` for capitals; `del` erases; `enter` saves; tap
   `` ` `` to cancel). *New empty song* starts fresh. Quick save (hold `` ` `` + `s`, or
   `fn`+`s`) saves to the open song, or asks for a name if it doesn't have one yet.
 - **Live:** shows what you play. `;`/`.` pick the track your keys play into, `,`/`/` change velocity.
-- **Setup:** MIDI transports, speaker, velocity, tempo, key & scale, piano mode,
-  metronome (off / when recording / always), record quantize.
+- **Setup:** MIDI transports, speaker on/off and volume, velocity, tempo, key & scale,
+  piano mode, metronome (off / when recording / always), record quantize, **MIDI clock
+  out** (Start, 24 clocks per beat and Stop while playing; on by default; set the
+  receiving device to sync to external MIDI clock).
 - **Key test:** see how many keys your unit reads at once.
 
 Piano and chord keys play into the selected track if it's a synth track (otherwise the
@@ -184,8 +204,9 @@ The device advertises as **Cardputer MIDI**.
 1. **Foundation** ✅: hardware layer, key layout, BLE + USB MIDI, live play, key test
 2. **Sequencer** ✅: clock, song/pattern data model, step sequencer, live recording with quantize
 3. **Tracker** ✅: tracker view of the same data (every note's pitch, velocity, length, timing offset)
-4. **Synth engine**: 8-track internal synth + drum synth (speaker; headphones on ADV)
-5. **Song mode + storage**: scenes + arrangement ✅, named songs ✅; still to do: SD card, MIDI clock in/out
+4. **Synth engine** ✅: per-track synth instruments + drum kit (speaker; headphones on ADV)
+5. **Song mode + storage** ✅: scenes + arrangement, named songs, SD card, MIDI clock out
+6. Ideas: MIDI clock *in* (follow another device), per-lane drum channels, CC automation lanes
 
 All views edit one shared song model, so anything entered in the step sequencer
 or recorded live shows up in the tracker immediately, and the other way round.
@@ -200,11 +221,12 @@ src/
   input/KeyInput      key list -> press/release events
   music/Theory        scales, chord building and naming
   play/LivePlayer     live notes/chords/drums, held-note bookkeeping
-  seq/Song            song / track / pattern / effects data model, named save & load
+  seq/Song            song / tracks / patterns / effects / scenes / instruments, save & load
+  seq/Storage         SD card mount
   seq/Engine          clock task, transport, playback, live recording
   midi/MidiOut        sends to every enabled transport
   midi/BleMidi        BLE MIDI peripheral (NimBLE)
-  audio/Monitor       speaker preview
+  audio/Synth         built-in synth + drum kit (own task, streams to the speaker)
   app/BootGuard       startup crash report
-  ui/                 screens (Step, Tracker, Live, Scenes, Arrange, Songs, Setup, Key test), track options panel + effect helpers, status bar, menu
+  ui/                 screens (Step, Tracker, Live, Scenes, Arrange, Songs, Setup, Key test, Synth), track options panel + effect helpers, status bar, menu
 ```

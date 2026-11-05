@@ -22,6 +22,38 @@ static const TrackDefault DEFAULTS[TRACKS] = {
     {"SYN7", TrackKind::Synth, 7}, {"SYN8", TrackKind::Synth, 8},
 };
 
+// ── Instruments ──────────────────────────────────────────────────────────────
+struct PresetDef {
+  const char* name;
+  Instrument in;
+};
+//                       snd vol  wave           oct det  A   D   S   R   cut res env
+static const PresetDef PRESETS[PRESET_COUNT] = {
+    {"Bass",   {1, 110, WAVE_SAW,      0,  0,  0, 30, 60, 10, 38, 50, 55}},
+    {"Pad",    {1,  80, WAVE_SAW,      0, 40, 70, 70, 90, 80, 62, 15, 20}},
+    {"Lead",   {1,  90, WAVE_SQUARE,   0, 10,  2, 40, 90, 25, 75, 35, 30}},
+    {"Pluck",  {1, 100, WAVE_PULSE,    0,  0,  0, 28,  0, 25, 45, 40, 80}},
+    {"Keys",   {1,  95, WAVE_TRIANGLE, 0,  6,  0, 50, 60, 40, 90, 10, 20}},
+    {"Bell",   {1,  85, WAVE_SINE,     1,  0,  0, 70,  0, 70, 127, 0,  0}},
+    {"Organ",  {1,  80, WAVE_SQUARE,   0, 12,  4, 10, 127, 20, 70, 10,  0}},
+    {"Sub",    {1, 120, WAVE_SINE,    -1,  0,  0, 20, 110, 15, 127, 0,  0}},
+};
+
+const char* presetName(uint8_t p) { return p < PRESET_COUNT ? PRESETS[p].name : ""; }
+
+void applyPreset(Instrument& in, uint8_t p) {
+  if (p < PRESET_COUNT) in = PRESETS[p].in;
+}
+
+void defaultInstrument(Instrument& in, uint8_t track, bool drum) {
+  if (drum) {
+    in = Instrument{1, 110, WAVE_NOISE, 0, 0, 0, 64, 0, 0, 80, 0, 0};
+    return;
+  }
+  static const uint8_t BY_TRACK[TRACKS] = {0, 0, 1, 2, 3, 4, 5, 6};  // BASS, CHRD=Pad, LEAD...
+  applyPreset(in, BY_TRACK[track % TRACKS]);
+}
+
 void songInit() {
   song.bpm = 120;
   for (auto& sc : song.scenes)
@@ -36,6 +68,7 @@ void songInit() {
     tr.channel = DEFAULTS[t].channel;
     tr.mute = false;
     tr.hold = false;
+    defaultInstrument(tr.inst, t, tr.kind == TrackKind::Drum);
     tr.pattern = 0;
     for (auto& p : tr.patterns) {
       p.length = 16;
@@ -236,7 +269,8 @@ void setPatternLength(Pattern& p, uint8_t length) {
 //     per pattern: length u16 count, then count x {step offset pitch vel u16 len}
 //                  [v3+: u16 fxCount, then fxCount x {step cmd val}]
 //   [v4+: scenes SCENES x TRACKS bytes, u8 arrangeCount, arrange bytes, u8 songMode]
-static constexpr uint8_t SONG_VERSION = 4;
+//   [v5+: per track, sizeof(Instrument) bytes]
+static constexpr uint8_t SONG_VERSION = 5;
 static char currentName[SONG_NAME_MAX + 1] = "";
 static Storage currentStore = Storage::Flash;
 
@@ -322,6 +356,8 @@ static bool writeSong(File& f) {
   f.write((uint8_t)song.arrange.size());
   if (!song.arrange.empty()) f.write(song.arrange.data(), song.arrange.size());
   f.write((uint8_t)song.songMode);
+  static_assert(sizeof(Instrument) == 12, "song file stores Instrument as 12 bytes");
+  for (const auto& tr : song.tracks) f.write((const uint8_t*)&tr.inst, sizeof(Instrument));
   return f.getWriteError() == 0;
 }
 
@@ -340,6 +376,7 @@ static bool readSong(File& f) {
     if (f.read((uint8_t*)tr.name, 6) != 6 || f.read(hdr, 4) != 4) return false;
     tr.name[5] = 0;
     tr.kind = hdr[0] == 1 ? TrackKind::Drum : TrackKind::Synth;
+    if (ver < 5) defaultInstrument(tr.inst, (uint8_t)(&tr - song.tracks), tr.kind == TrackKind::Drum);
     tr.channel = (hdr[1] >= 1 && hdr[1] <= 16) ? hdr[1] : 1;
     tr.mute = hdr[2] != 0;
     tr.pattern = hdr[3] < PATTERNS ? hdr[3] : 0;
@@ -387,6 +424,12 @@ static bool readSong(File& f) {
     if (song.arrange.empty()) song.arrange.assign(1, 0);
     if (f.read(&mode, 1) != 1) return false;
     song.songMode = mode != 0;
+  }
+  if (ver >= 5) {
+    for (auto& tr : song.tracks) {
+      if (f.read((uint8_t*)&tr.inst, sizeof(Instrument)) != sizeof(Instrument)) return false;
+      if (tr.inst.wave >= WAVE_COUNT) tr.inst.wave = WAVE_SAW;
+    }
   }
   return true;
 }
