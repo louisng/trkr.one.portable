@@ -9,6 +9,7 @@
 #include "../input/KeyLayout.h"
 #include "../midi/MidiOut.h"
 #include "../music/Theory.h"
+#include "../seq/Engine.h"
 
 namespace player {
 
@@ -16,6 +17,7 @@ using layout::Role;
 
 struct Held {
   uint8_t channel;  // 0 = nothing held
+  uint8_t track;
   uint8_t count;
   uint8_t notes[theory::MAX_CHORD_NOTES];
 };
@@ -44,7 +46,17 @@ void begin() {
   memset(refs, 0, sizeof(refs));
 }
 
+static const char* const DRUM_SHORT[12] = {"KK", "SN", "RM", "CP", "CH", "OH",
+                                           "LT", "MT", "HT", "CR", "RD", "CB"};
+
 const char* drumName(uint8_t pad) { return pad < 12 ? DRUM_NAMES[pad] : ""; }
+const char* drumShortName(uint8_t pad) { return pad < 12 ? DRUM_SHORT[pad] : ""; }
+uint8_t drumNote(uint8_t pad) { return DRUM_NOTES[pad % 12]; }
+int drumPadForNote(uint8_t note) {
+  for (uint8_t i = 0; i < 12; i++)
+    if (DRUM_NOTES[i] == note) return i;
+  return -1;
+}
 uint8_t inversion() { return inv; }
 const char* lastPlayed() { return last; }
 bool keySounding(uint8_t k) { return k < layout::KEY_COUNT && held[k].channel != 0; }
@@ -76,6 +88,7 @@ int pianoNoteFor(uint8_t semitone) {
   if (settings.pianoScaleMode) {
     int deg = WHITE_TO_DEGREE[semitone % 12];
     if (deg < 0) return -1;  // black keys are unused in scale mode
+    deg += 7 * (semitone / 12);
     n = base + settings.root + theory::scaleOffset(settings.scale, deg);
   } else {
     n = base + semitone;
@@ -86,12 +99,14 @@ int pianoNoteFor(uint8_t semitone) {
 static void press(uint8_t k, const layout::KeyDef& def) {
   Held& h = held[k];
   if (h.channel) return;  // already sounding
+  const uint8_t synthTrack = seq::liveSynthTrack();
+  const uint8_t drumTrack = seq::liveDrumTrack();
 
   switch (def.role) {
     case Role::Piano: {
       int n = pianoNoteFor(def.value);
       if (n < 0) return;
-      h = {settings.pianoCh, 1, {(uint8_t)n}};
+      h = {seq::song.tracks[synthTrack].channel, synthTrack, 1, {(uint8_t)n}};
       startNote(h.channel, (uint8_t)n, false, 0);
       theory::formatNote((uint8_t)n, last);
       break;
@@ -108,7 +123,8 @@ static void press(uint8_t k, const layout::KeyDef& def) {
       theory::Chord c = theory::buildChord(settings.scale, settings.root, def.value,
                                            (uint8_t)bass, mods);
       if (!c.count) return;
-      h.channel = settings.chordCh;
+      h.channel = seq::song.tracks[synthTrack].channel;
+      h.track = synthTrack;
       h.count = c.count;
       memcpy(h.notes, c.notes, c.count);
       for (uint8_t i = 0; i < c.count; i++) startNote(h.channel, c.notes[i], false, 0);
@@ -117,7 +133,7 @@ static void press(uint8_t k, const layout::KeyDef& def) {
     }
     case Role::Drum: {
       uint8_t pad = def.value % 12;
-      h = {settings.drumCh, 1, {DRUM_NOTES[pad]}};
+      h = {seq::song.tracks[drumTrack].channel, drumTrack, 1, {DRUM_NOTES[pad]}};
       startNote(h.channel, DRUM_NOTES[pad], true, pad);
       snprintf(last, sizeof(last), "%s", DRUM_NAMES[pad]);
       break;
@@ -136,14 +152,31 @@ static void release(uint8_t k, const layout::KeyDef& def) {
   h.count = 0;
 }
 
-bool onKey(uint8_t k, bool pressed) {
+static void fillPlayed(Played* out, uint8_t k, const layout::KeyDef& def, bool pressed) {
+  if (!out) return;
+  const Held& h = held[k];
+  out->valid = h.channel != 0;
+  out->pressed = pressed;
+  out->role = def.role;
+  out->track = h.track;
+  out->pad = def.role == Role::Drum ? def.value % 12 : 0;
+  out->count = h.count;
+  memcpy(out->notes, h.notes, h.count);
+}
+
+bool onKey(uint8_t k, bool pressed, Played* out) {
   const layout::KeyDef& def = layout::keyAt(k);
   switch (def.role) {
     case Role::Piano:
     case Role::Chord:
     case Role::Drum:
-      if (pressed) press(k, def);
-      else release(k, def);
+      if (pressed) {
+        press(k, def);
+        fillPlayed(out, k, def, true);
+      } else {
+        fillPlayed(out, k, def, false);  // before release clears it
+        release(k, def);
+      }
       return true;
     case Role::Action:
       if (!pressed) return false;

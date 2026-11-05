@@ -8,6 +8,7 @@
 #include "input/KeyInput.h"
 #include "midi/MidiOut.h"
 #include "play/LivePlayer.h"
+#include "seq/Engine.h"
 #include "ui/Ui.h"
 
 using namespace bootguard;
@@ -44,6 +45,9 @@ void setup() {
 
   stage(ST_SETTINGS);
   settingsLoad();
+  seq::songInit();
+  seq::songLoad();  // last saved song, if any
+  seq::engineBegin();
 
   stage(ST_SPEAKER);
   if (skipped(ST_SPEAKER)) settings.speaker = false;
@@ -71,7 +75,10 @@ void setup() {
 void loop() {
   M5Cardputer.update();  // scans the keyboard
   ui::tick();            // key events -> notes / screens, redraw when needed
-  midi::update();        // sends this pass's BLE MIDI packet
+  {
+    seq::Lock l;
+    midi::update();  // sends this pass's BLE MIDI packet
+  }
 #ifdef BOOT_DEBUG
   static uint32_t lastBeat = 0;
   if (millis() - lastBeat > 2000) {

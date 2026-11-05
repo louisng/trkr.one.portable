@@ -8,6 +8,7 @@
 #include "../midi/MidiOut.h"
 #include "../music/Theory.h"
 #include "../play/LivePlayer.h"
+#include "../seq/Engine.h"
 #include "Screen.h"
 #include "Ui.h"
 
@@ -23,19 +24,24 @@ static char toastMsg[40] = "";
 static uint32_t toastUntil = 0;
 
 // Hold ` (menu key): overlay with screen jumps + transport toggles.
-// Tap ` alone: back to the Live screen.
+// Tap ` alone: flip between the Live and Step screens.
+// Hold fn + key: quick toggles (speaker, upper piano, Bluetooth, USB).
 static bool menuHeld = false;
 static bool menuUsed = false;
 static uint32_t menuSince = 0;
 static constexpr uint32_t MENU_SHOW_DELAY_MS = 180;
 static uint64_t swallowed = 0;  // keys pressed inside the menu: ignore their release
 
+static bool fnHeld = false;
+static Screen* lastMain = nullptr;  // Live or Step: where a tap of ` returns to
+static int lastPlayStep = -2;
+
 static midi::LinkState lastBle, lastUsb;
 static bool adv = false;
 
-// Menu shortcut keys, looked up by key cap so they follow the layout table.
-static int8_t idxDigit[3];
-static int8_t idxB = -1, idxU = -1, idxM = -1;
+// Shortcut keys, looked up by key cap so they follow the layout table.
+static int8_t idxDigit[4];
+static int8_t idxB = -1, idxU = -1, idxM = -1, idxP = -1, idxS = -1;
 
 static int8_t findCap(const char* cap) {
   for (uint8_t r = 0; r < layout::ROWS; r++)
@@ -56,6 +62,7 @@ void toast(const char* msg) {
 
 static void switchTo(Screen* s) {
   if (s == current) return;
+  if (s == liveScreen() || s == stepScreen()) lastMain = s;
   if (current) current->onLeave();
   if (!s->musicKeys()) player::releaseAll();
   current = s;
@@ -80,44 +87,108 @@ static void toggleSpeaker() {
   toast(settings.speaker ? "Speaker on" : "Speaker off");
 }
 
+static void toggleUpperPiano() {
+  player::releaseAll();  // the keys are about to change meaning
+  settings.upperPiano = !settings.upperPiano;
+  layout::setUpperPiano(settings.upperPiano);
+  toast(settings.upperPiano ? "Top rows: piano (upper octave)" : "Top rows: drums + chords");
+}
+
+static void saveSong() {
+  bool ok = seq::songSave();
+  toast(ok ? "Song saved" : "Save failed");
+}
+
 static void handleMenuKey(uint8_t idx) {
   if (idx == idxDigit[0]) switchTo(liveScreen());
-  else if (idx == idxDigit[1]) switchTo(setupScreen());
-  else if (idx == idxDigit[2]) switchTo(keyTestScreen());
+  else if (idx == idxDigit[1]) switchTo(stepScreen());
+  else if (idx == idxDigit[2]) switchTo(setupScreen());
+  else if (idx == idxDigit[3]) switchTo(keyTestScreen());
   else if (idx == idxB) toggleBle();
   else if (idx == idxU) toggleUsb();
   else if (idx == idxM) toggleSpeaker();
+  else if (idx == idxP) toggleUpperPiano();
+  else if (idx == idxS) saveSong();
+}
+
+static void handleFnKey(uint8_t idx) {
+  if (idx == idxM) toggleSpeaker();
+  else if (idx == idxP) toggleUpperPiano();
+  else if (idx == idxB) toggleBle();
+  else if (idx == idxU) toggleUsb();
+  else if (idx == idxS) saveSong();
+}
+
+// space / enter work on every screen that plays music.
+static bool handleTransport(uint8_t action) {
+  if (action == layout::ACT_PLAY) {
+    if (seq::playing()) seq::stop();
+    else seq::play();
+    return true;
+  }
+  if (action == layout::ACT_ENTER) {
+    seq::setRecordArmed(!seq::recordArmed());
+    toast(seq::recordArmed() ? "Record armed" : "Record off");
+    return true;
+  }
+  return false;
 }
 
 static void handleEvent(const keys::Event& e) {
   dirty = true;
   current->onRawKey(e.index, e.pressed);
   const layout::KeyDef& def = layout::keyAt(e.index);
-  uint64_t bit = 1ULL << e.index;
+  const uint64_t bit = 1ULL << e.index;
+  const bool isAction = def.role == layout::Role::Action;
 
-  if (def.role == layout::Role::Action && def.value == layout::ACT_MENU) {
+  if (isAction && def.value == layout::ACT_MENU) {
     if (e.pressed) {
       menuHeld = true;
       menuUsed = false;
       menuSince = millis();
     } else {
-      if (menuHeld && !menuUsed) switchTo(liveScreen());
+      if (menuHeld && !menuUsed)
+        switchTo(current == liveScreen() ? stepScreen()
+                 : current == stepScreen() ? liveScreen()
+                                           : (lastMain ? lastMain : liveScreen()));
       menuHeld = false;
     }
     return;
   }
-  if (menuHeld && e.pressed) {
+  if (isAction && def.value == layout::ACT_FN) {
+    fnHeld = e.pressed;
+    return;
+  }
+  if ((menuHeld || fnHeld) && e.pressed) {
     menuUsed = true;
     swallowed |= bit;
-    handleMenuKey(e.index);
+    if (menuHeld) handleMenuKey(e.index);
+    else handleFnKey(e.index);
     return;
   }
   if (!e.pressed && (swallowed & bit)) {
     swallowed &= ~bit;
     return;
   }
-  if (current->musicKeys() && player::onKey(e.index, e.pressed)) return;
-  if (e.pressed && def.role == layout::Role::Action) current->onAction(def.value);
+
+  if (current->musicKeys()) {
+    if (e.pressed && isAction && handleTransport(def.value)) return;
+    player::Played played;
+    if (player::onKey(e.index, e.pressed, &played)) {
+      if (played.valid) {
+        if (seq::recording()) {
+          if (played.pressed)
+            seq::recordPress(e.index, played.track, played.notes, played.count, settings.velocity);
+          else
+            seq::recordRelease(e.index);
+        } else {
+          current->onPlayed(e.index, played);
+        }
+      }
+      return;
+    }
+  }
+  if (e.pressed && isAction) current->onAction(def.value);
 }
 
 // ── Drawing ──────────────────────────────────────────────────────────────────
@@ -139,6 +210,16 @@ static void drawStatusBar() {
   canvas.setTextDatum(middle_left);
   canvas.drawString(current->title(), 3, 7);
 
+  // Transport: green triangle = playing, red dot = record armed (filled while recording).
+  int tx = 3 + canvas.textWidth(current->title()) + 6;
+  if (seq::playing()) canvas.fillTriangle(tx, 3, tx, 11, tx + 7, 7, col::OK);
+  else canvas.fillRect(tx, 4, 7, 7, col::FAINT);
+  tx += 11;
+  if (seq::recordArmed()) {
+    if (seq::recording()) canvas.fillCircle(tx + 3, 7, 4, 0xF800);
+    else canvas.drawCircle(tx + 3, 7, 4, 0xF800);
+  }
+
   int x = W - 3 - 24;
   drawPill(x, "SPK", settings.speaker ? midi::LinkState::Connected : midi::LinkState::Off);
   x -= 27;
@@ -147,35 +228,37 @@ static void drawStatusBar() {
   drawPill(x, "BLE", midi::bleState());
 
   char info[16];
-  snprintf(info, sizeof(info), "%s O%d", adv ? "ADV" : "CP", settings.octave);
+  snprintf(info, sizeof(info), "%d O%d", seq::song.bpm, settings.octave);
   canvas.setTextColor(col::DIM);
   canvas.setTextDatum(middle_right);
   canvas.drawString(info, x - 5, 7);
 }
 
 static void drawMenu() {
-  const int x = 14, y = 22, w = W - 28, h = 100;
+  const int x = 10, y = 18, w = W - 20, h = 114;
   canvas.fillRoundRect(x, y, w, h, 6, col::BAR);
   canvas.drawRoundRect(x, y, w, h, 6, col::ACCENT);
   canvas.setFont(&fonts::Font0);
   canvas.setTextDatum(top_left);
   canvas.setTextColor(col::ACCENT);
-  canvas.drawString("MENU  (hold `, press a key)", x + 8, y + 7);
+  canvas.drawString("MENU  (hold `, press a key)", x + 8, y + 6);
 
   canvas.setTextColor(col::TEXT);
-  canvas.drawString("1  Live play", x + 8, y + 24);
-  canvas.drawString("2  Setup", x + 8, y + 36);
-  canvas.drawString("3  Key test", x + 8, y + 48);
+  canvas.drawString("1 Live     2 Step", x + 8, y + 20);
+  canvas.drawString("3 Setup    4 Key test", x + 8, y + 31);
+  canvas.drawString("s Save song", x + 8, y + 42);
+
+  char buf[40];
+  snprintf(buf, sizeof(buf), "b Bluetooth MIDI: %s", settings.bleMidi ? "ON" : "off");
+  canvas.drawString(buf, x + 8, y + 56);
+  snprintf(buf, sizeof(buf), "u USB MIDI: %s", settings.usbMidi ? "ON" : "off");
+  canvas.drawString(buf, x + 8, y + 67);
+  snprintf(buf, sizeof(buf), "m Speaker: %s", settings.speaker ? "ON" : "off");
+  canvas.drawString(buf, x + 8, y + 78);
+  snprintf(buf, sizeof(buf), "p Top rows: %s", settings.upperPiano ? "piano" : "drums+chords");
+  canvas.drawString(buf, x + 8, y + 89);
   canvas.setTextColor(col::DIM);
-  canvas.drawString("Step/Tracker/Song: coming soon", x + 8, y + 60);
-
-  char buf[32];
-  canvas.setTextColor(col::TEXT);
-  snprintf(buf, sizeof(buf), "b  Bluetooth MIDI: %s", settings.bleMidi ? "ON" : "off");
-  canvas.drawString(buf, x + 8, y + 74);
-  snprintf(buf, sizeof(buf), "u  USB MIDI: %s   m  Speaker: %s", settings.usbMidi ? "ON" : "off",
-           settings.speaker ? "ON" : "off");
-  canvas.drawString(buf, x + 8, y + 86);
+  canvas.drawString("fn + m/p/b/u/s does the same", x + 8, y + 101);
 }
 
 static void drawToast() {
@@ -192,28 +275,36 @@ static bool menuDrawn = false;
 static bool menuVisible() { return menuHeld && millis() - menuSince >= MENU_SHOW_DELAY_MS; }
 
 static void render() {
-  canvas.fillScreen(col::BG);
-  current->draw(canvas);
-  drawStatusBar();
+  {
+    seq::Lock l;  // the screens read the song while drawing
+    canvas.fillScreen(col::BG);
+    current->draw(canvas);
+    drawStatusBar();
+  }
   menuDrawn = menuVisible();
   if (menuDrawn) drawMenu();
   if (millis() < toastUntil) drawToast();
-  canvas.pushSprite(&M5Cardputer.Display, 0, 0);
+  canvas.pushSprite(&M5Cardputer.Display, 0, 0);  // slow SPI transfer: outside the lock
 }
 
 void begin() {
   adv = M5.getBoard() == m5::board_t::board_M5CardputerADV;
   canvas.setColorDepth(16);
   canvas.createSprite(W, H);
-  idxDigit[0] = findCap("1");
-  idxDigit[1] = findCap("2");
-  idxDigit[2] = findCap("3");
+  for (uint8_t i = 0; i < 4; i++) {
+    char cap[2] = {(char)('1' + i), 0};
+    idxDigit[i] = findCap(cap);
+  }
   idxB = findCap("b");
   idxU = findCap("u");
   idxM = findCap("m");
+  idxP = findCap("p");
+  idxS = findCap("s");
+  layout::setUpperPiano(settings.upperPiano);
   lastBle = midi::bleState();
   lastUsb = midi::usbState();
-  current = liveScreen();
+  current = stepScreen();
+  lastMain = current;
   current->onEnter();
   dirty = true;
 }
@@ -221,7 +312,10 @@ void begin() {
 void tick() {
   keys::Event ev[16];
   uint8_t n = keys::poll(ev, 16);
-  for (uint8_t i = 0; i < n; i++) handleEvent(ev[i]);
+  if (n) {
+    seq::Lock l;
+    for (uint8_t i = 0; i < n; i++) handleEvent(ev[i]);
+  }
 
   uint32_t now = millis();
   midi::LinkState b = midi::bleState(), u = midi::usbState();
@@ -230,6 +324,12 @@ void tick() {
     if (u == midi::LinkState::Connected && lastUsb != u) toast("USB MIDI connected");
     lastBle = b;
     lastUsb = u;
+    dirty = true;
+  }
+  // Follow the playhead.
+  int ps = seq::trackStep(seq::selectedTrack());
+  if (ps != lastPlayStep) {
+    lastPlayStep = ps;
     dirty = true;
   }
   // Menu overlay appears after a short delay; toast disappears on its own.

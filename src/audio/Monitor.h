@@ -11,6 +11,7 @@ void setVolume(uint8_t v);
 void noteOn(uint8_t note);
 void noteOff(uint8_t note);
 void drum(uint8_t pad);
+void click(bool accent);  // metronome
 void allOff();
 
 }  // namespace monitor

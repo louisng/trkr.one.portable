@@ -5,7 +5,7 @@
 
 Settings settings;
 
-static const uint32_t SETTINGS_VERSION = 1;
+static const uint32_t SETTINGS_VERSION = 2;  // bump when Settings changes
 static Settings saved;  // copy of what is in flash, to skip redundant writes
 
 void settingsLoad() {

@@ -8,13 +8,18 @@ original's GPIO key matrix and the ADV's TCA8418 chip) onto the same 4 × 14 key
 It grows out of [Ardutracker](https://github.com/louisng/ardutracker), a tracker and
 USB MIDI sequencer for the Arduboy.
 
-## Status: phase 1 (foundation)
+## Status: phase 2 (sequencer)
 
-- Play live from the whole keyboard: one-octave piano, 13 chord buttons, 12 drum pads
+- **Sequencer:** 8 tracks × 8 patterns, 1–64 steps per pattern, up to 4 notes per step.
+  Every note keeps its velocity, length and a fine timing offset (the tracker in phase 3
+  shows and edits all of it). Tracks can have different lengths and loop independently.
+- **Step screen** for writing patterns note by note, **live recording** while playing
+  (with optional snap-to-step and a metronome click)
+- Live play from the whole keyboard: piano, 13 chord buttons, 12 drum pads, or a second
+  piano octave on the top rows
 - Bluetooth LE MIDI and USB MIDI, each switchable on/off at any time
-- Simple speaker preview so you can hear what you play without a host
-- Key-test screen to see how many keys your unit can read at once (ghosting)
-- Settings saved to flash
+- Simple speaker preview (switch off with fn+m when you only want MIDI out)
+- The song is saved to flash (hold `` ` `` + `s`, or fn+`s`) and reloaded at power-on
 
 ## Keyboard
 
@@ -36,22 +41,48 @@ Row 4  ct op alt z  x  c  v  b  n  m  ,  .  /  space     piano white keys
 | `tab` | cycle chord inversion (root, 1st, 2nd) |
 | `1` … `=` | drum pads: kick, snare, rim, clap, closed hat, open hat, low/mid/high tom, crash, ride, cowbell |
 | `;` `.` `,` `/` | cursor up / down / left / right (no fn needed) |
-| `` ` `` tap | back to Live |
-| `` ` `` hold | menu: `1` Live, `2` Setup, `3` Key test, `b` toggle Bluetooth MIDI, `u` toggle USB MIDI, `m` toggle speaker |
-| `enter` / `space` | record / play (sequencer, phase 2) |
-| `f` `l` `'` | free for now |
+| `space` | play / stop (any screen) |
+| `enter` | arm / disarm recording (records while playing) |
+| `f` / `l` | Step screen: shorten / lengthen the note you just entered |
+| `'` | Step screen: pattern & track options |
+| `del` | Step screen: clear the step under the cursor |
+| `` ` `` tap | flip between the Live and Step screens |
+| `` ` `` hold | menu: `1` Live, `2` Step, `3` Setup, `4` Key test, `s` save song, `b` Bluetooth MIDI, `u` USB MIDI, `m` speaker, `p` top rows mode |
+| `fn` + `m` / `p` / `b` / `u` / `s` | speaker on/off · top rows piano ↔ drums+chords · Bluetooth MIDI · USB MIDI · save song |
 
-On the **Live** screen: `;`/`.` change velocity, `,`/`/` change the key's root note.
-Setup lets you set channels (piano 1, chords 2, drums 10 by default), key, scale and
-**piano mode**. In *scale* mode the seven white keys play the seven notes of the
-current scale, so you can't hit a wrong note.
+**Upper piano (fn+p):** the top two rows become a second, higher piano octave in the
+classic tracker layout: `q w e r t y u i o p [ ] \` are white keys (C up to A) and
+`2 3 5 6 7 9 0 =` are the black keys. Press fn+p again to get drums and chords back.
+
+### Screens
+
+- **Step** (default): `;`/`.` pick the track, `,`/`/` move the cursor.
+  - *Synth tracks:* press a piano key or chord button to write it at the cursor; the
+    cursor moves to the next step. Press more keys while still holding the first to stack
+    them on the same step. `f`/`l` change the length of what you just entered.
+  - *Drum tracks:* a 12-lane grid; drum pads toggle hits at the cursor.
+  - `'` opens options: pattern (1–8), length (1–64 steps), MIDI channel, synth/drum type,
+    mute, tempo.
+- **Live:** shows what you play. `;`/`.` pick the track your keys play into, `,`/`/` change velocity.
+- **Setup:** MIDI transports, speaker, velocity, tempo, key & scale, piano mode,
+  metronome (off / when recording / always), record quantize.
+- **Key test:** see how many keys your unit reads at once.
+
+Piano and chord keys play into the selected track if it's a synth track (otherwise the
+first synth track); drum pads play into the selected track if it's a drum track (otherwise
+the first drum track). Default tracks: 1 DRUM (ch 10), 2 BASS (ch 2), 3 CHRD (ch 3),
+4 LEAD (ch 4), 5–8 (ch 5–8).
+
+**Recording:** press `enter` (red ring in the status bar), then `space`. Whatever you play
+is written into the track it's played on, in time; overdubbing the same pitch on the same
+step replaces it. With *Rec quantize* on, notes snap to the nearest step.
 
 The status bar always shows **BLE** and **USB**: grey = off, amber = on but nothing
 connected, green = connected.
 
 ## Quick flash (no tools to install)
 
-1. Download [`firmware/cardputer-midi-phase1.bin`](firmware/cardputer-midi-phase1.bin).
+1. Download [`firmware/cardputer-midi.bin`](firmware/cardputer-midi.bin).
 2. Put the Cardputer in download mode: power off, hold **G0**, plug in USB-C, power on, release G0.
 3. In Chrome or Edge, open <https://espressif.github.io/esptool-js/>, set baud 921600, click **Connect** and pick the ESP32-S3 port.
 4. Flash address `0x0`, choose the `.bin`, click **Program**.
@@ -83,7 +114,7 @@ The device advertises as **Cardputer MIDI**.
 ## Roadmap
 
 1. **Foundation** ✅: hardware layer, key layout, BLE + USB MIDI, live play, key test
-2. **Sequencer**: clock, song/pattern data model, step sequencer, live recording with quantize
+2. **Sequencer** ✅: clock, song/pattern data model, step sequencer, live recording with quantize
 3. **Tracker**: tracker view of the same data (edit every note's value, velocity, length, timing offset, effect)
 4. **Synth engine**: 8-track internal synth + drum synth (speaker; headphones on ADV)
 5. **Song mode + storage**: pattern arranger, save/load on SD card, MIDI clock in/out
@@ -101,8 +132,11 @@ src/
   input/KeyInput      key list -> press/release events
   music/Theory        scales, chord building and naming
   play/LivePlayer     live notes/chords/drums, held-note bookkeeping
+  seq/Song            song / track / pattern data model, save & load
+  seq/Engine          clock task, transport, playback, live recording
   midi/MidiOut        sends to every enabled transport
   midi/BleMidi        BLE MIDI peripheral (NimBLE)
   audio/Monitor       speaker preview
-  ui/                 screens, status bar, menu
+  app/BootGuard       startup crash report
+  ui/                 screens (Step, Live, Setup, Key test), status bar, menu
 ```

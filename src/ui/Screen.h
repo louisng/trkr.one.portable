@@ -2,6 +2,8 @@
 #include <M5Cardputer.h>
 #include <stdint.h>
 
+#include "../play/LivePlayer.h"
+
 namespace ui {
 
 static constexpr int W = 240;
@@ -36,12 +38,15 @@ class Screen {
   virtual void onLeave() {}
   // Action keys (arrows, enter, del, space) -- presses only.
   virtual void onAction(uint8_t action) {}
+  // A musical key was played (not while live recording). Used for step entry.
+  virtual void onPlayed(uint8_t key, const player::Played& p) {}
   // Every raw key event, before anything else handles it.
   virtual void onRawKey(uint8_t index, bool pressed) {}
   virtual void draw(M5Canvas& c) = 0;
 };
 
 Screen* liveScreen();
+Screen* stepScreen();
 Screen* setupScreen();
 Screen* keyTestScreen();
 

@@ -4,12 +4,27 @@
 // always stops the right notes even if octave / key / modifiers changed.
 #include <stdint.h>
 
+#include "../input/KeyLayout.h"
+
 namespace player {
+
+// What a musical key press/release did, so screens can write it into the
+// song (step entry) and the engine can record it.
+struct Played {
+  bool valid = false;
+  bool pressed = false;
+  layout::Role role = layout::Role::None;
+  uint8_t track = 0;  // song track it was played on
+  uint8_t pad = 0;    // drum pad (drums only)
+  uint8_t count = 0;
+  uint8_t notes[5];
+};
 
 void begin();
 // Handles musical roles (piano / chord / drum) and the octave + inversion keys.
-// Returns true if the key was consumed.
-bool onKey(uint8_t keyIndex, bool pressed);
+// Returns true if the key was consumed. Fills `out` for note keys.
+// Call with the engine lock held.
+bool onKey(uint8_t keyIndex, bool pressed, Played* out = nullptr);
 void releaseAll();  // stop everything that's held (e.g. when switching screens)
 
 uint8_t inversion();
@@ -19,7 +34,10 @@ const char* lastPlayed();
 int pianoNoteFor(uint8_t semitoneValue);
 // True if the given key index is currently sounding something.
 bool keySounding(uint8_t keyIndex);
-// Name for drum pad 0-11.
+// Name / MIDI note for drum pad 0-11, and the pad for a note (-1 if none).
 const char* drumName(uint8_t pad);
+const char* drumShortName(uint8_t pad);
+uint8_t drumNote(uint8_t pad);
+int drumPadForNote(uint8_t note);
 
 }  // namespace player

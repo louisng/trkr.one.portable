@@ -95,6 +95,14 @@ void drum(uint8_t pad) {
     M5Cardputer.Speaker.tone(d.freq, d.ms, ch, true, toneWave, sizeof(toneWave));
 }
 
+void click(bool accent) {
+  if (!on) return;
+  uint8_t ch = allocSlot();
+  uint32_t now = millis();
+  slots[ch] = {0xC0, now + 25, now};
+  M5Cardputer.Speaker.tone(accent ? 2000 : 1300, 25, ch, true, toneWave, sizeof(toneWave));
+}
+
 void allOff() {
   for (uint8_t i = 0; i < CHANNELS; i++) {
     M5Cardputer.Speaker.stop(i);
