@@ -49,6 +49,14 @@ current scale, so you can't hit a wrong note.
 The status bar always shows **BLE** and **USB**: grey = off, amber = on but nothing
 connected, green = connected.
 
+## Quick flash (no tools to install)
+
+1. Download [`firmware/cardputer-midi-phase1.bin`](firmware/cardputer-midi-phase1.bin).
+2. Put the Cardputer in download mode: power off, hold **G0**, plug in USB-C, power on, release G0.
+3. In Chrome or Edge, open <https://espressif.github.io/esptool-js/>, set baud 921600, click **Connect** and pick the ESP32-S3 port.
+4. Flash address `0x0`, choose the `.bin`, click **Program**.
+5. Power-cycle the Cardputer.
+
 ## Building and flashing
 
 Requires [PlatformIO](https://platformio.org/) (VS Code extension or `pip install platformio`).
