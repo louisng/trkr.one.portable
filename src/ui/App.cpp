@@ -13,7 +13,7 @@
 
 namespace ui {
 
-static M5Canvas canvas(&M5Cardputer.Display);
+static M5Canvas canvas;  // parentless; pushed to the display explicitly
 static Screen* current = nullptr;
 static bool dirty = true;
 static uint32_t lastDraw = 0;
@@ -198,7 +198,7 @@ static void render() {
   menuDrawn = menuVisible();
   if (menuDrawn) drawMenu();
   if (millis() < toastUntil) drawToast();
-  canvas.pushSprite(0, 0);
+  canvas.pushSprite(&M5Cardputer.Display, 0, 0);
 }
 
 void begin() {

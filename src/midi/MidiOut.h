@@ -11,7 +11,8 @@ enum class LinkState : uint8_t {
   Connected,  // enabled and a host is connected
 };
 
-void begin(bool bleEnabled, bool usbEnabled);
+void beginUsb(bool enabled);
+void beginBle(bool enabled);
 void update();  // call every loop: flushes BLE packets, tracks connection changes
 
 void setBleEnabled(bool on);

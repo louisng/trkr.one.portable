@@ -17,11 +17,14 @@ static uint32_t sentCount = 0;
 
 static bool usbMounted() { return (bool)USB; }
 
-void begin(bool bleEnabled, bool usbEnabled) {
+void beginUsb(bool enabled) {
   usbMidi.begin();
-  usbOn = usbEnabled;
+  usbOn = enabled;
+}
+
+void beginBle(bool enabled) {
   blemidi::begin("Cardputer MIDI");
-  blemidi::setEnabled(bleEnabled);
+  blemidi::setEnabled(enabled);
 }
 
 void update() { blemidi::flush(); }
