@@ -15,6 +15,9 @@ struct Settings {
   uint8_t metronome = 1;   // 0 off, 1 while recording, 2 always
   bool quantize = true;    // snap live-recorded notes to steps
   bool upperPiano = false; // top two rows = second piano octave (fn+p)
+  char lastSong[17] = "";  // song loaded at power-on
+  // New fields go at the end: older saved settings still load (the new
+  // fields keep their defaults).
 };
 
 extern Settings settings;

@@ -4,6 +4,7 @@
 //
 // Timing: a step is a 16th note, divided into TICKS_PER_STEP ticks.
 // Notes are stored sparsely per pattern, sorted by step.
+#include <Arduino.h>
 #include <stdint.h>
 
 #include <vector>
@@ -35,9 +36,29 @@ struct NoteEvent {
   uint8_t flags;
 };
 
+// Tracker effects: one per step, applied to every note on it.
+enum FxCmd : uint8_t {
+  FX_NONE = 0,
+  FX_CHANCE,    // P xx: plays with xx% probability (00-64 hex = 0-100%)
+  FX_RATCHET,   // R 0n: n quick repeats inside the step (2-6)
+  FX_COND,      // T xy: plays on the x-th of every y loops of the pattern
+  FX_HUMANIZE,  // H xx: velocity varies randomly by up to +/- xx
+  FX_MOD,       // M xx: sends mod wheel (CC1) = xx at the step
+  FX_BEND,      // B xx: sends pitch bend, 40 = centre
+  FX_PROGRAM,   // G xx: sends program change xx
+  FX_COUNT
+};
+
+struct StepFx {
+  uint8_t step;
+  uint8_t cmd;
+  uint8_t val;
+};
+
 struct Pattern {
   uint8_t length = 16;  // steps
   std::vector<NoteEvent> notes;  // sorted by step, then pitch
+  std::vector<StepFx> fx;        // unordered, at most one per step
 };
 
 enum class TrackKind : uint8_t { Synth, Drum };
@@ -91,8 +112,18 @@ bool doublePattern(Pattern& p);
 void setStepOff(Pattern& p, uint8_t step);
 bool isOffStep(const Pattern& p, uint8_t step);
 
+bool fxAt(const Pattern& p, uint8_t step, uint8_t* cmd, uint8_t* val);
+void setFx(Pattern& p, uint8_t step, uint8_t cmd, uint8_t val);  // cmd FX_NONE removes
+
 // ── Persistence (flash) ──────────────────────────────────────────────────────
-bool songSave();
-bool songLoad();
+static constexpr uint8_t SONG_NAME_MAX = 16;
+bool validSongName(const char* name);  // letters, digits, - _ and inner spaces
+const char* currentSongName();         // "" for a new, unsaved song
+bool songSave();                       // to the current name (false if none)
+bool songSaveAs(const char* name);
+bool songLoadNamed(const char* name);
+bool songDelete(const char* name);
+void songNew();
+std::vector<String> songList();        // sorted names
 
 }  // namespace seq

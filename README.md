@@ -22,7 +22,10 @@ USB MIDI sequencer for the Arduboy.
   piano octave on the top rows
 - Bluetooth LE MIDI and USB MIDI, each switchable on/off at any time
 - Simple speaker preview (switch off with fn+m when you only want MIDI out)
-- The song is saved to flash (hold `` ` `` + `s`, or fn+`s`) and reloaded at power-on
+- **Named songs**: save as many as fit (about 1.5 MB), with names typed on the keyboard;
+  Songs screen to load / save over / delete. The song you had open loads at power-on.
+- **Tracker effects**: chance, ratchets, trig conditions, humanize, mod wheel, pitch bend,
+  program change
 
 ## Keyboard
 
@@ -43,15 +46,16 @@ Row 4  ct op alt z  x  c  v  b  n  m  ,  .  /  space     piano white keys
 | hold `shift` / `ctrl` / `opt` / `alt` while pressing a chord | add 7th / add 9th / swap major↔minor / sus4 |
 | `tab` | cycle chord inversion (root, 1st, 2nd) |
 | `1` … `=` | drum pads: kick, snare, rim, clap, closed hat, open hat, low/mid/high tom, crash, ride, cowbell |
-| `;` `.` `,` `/` | cursor up / down / left / right (no fn needed) |
+| `;` `.` `,` `/` | cursor up / down / left / right (no fn needed); hold to repeat |
+| `opt` + `;` `.` | Tracker: jump 10 rows · `opt` + `,` `/` on Step: jump 10 steps |
 | `space` | play / stop (any screen) |
 | `enter` | arm / disarm recording (records while playing) |
 | `f` / `l` | Step screen: note length for what you just entered (¼, ½, 1, 2, 3… steps); in the options panel, pattern length ± a bar |
 | `'` | Step screen: pattern & track options |
 | `del` | Step screen: clear the step under the cursor; on an empty step, insert **OFF** (stops held notes) |
 | `` ` `` tap | cycle Step → Tracker → Live |
-| `` ` `` hold | menu: `1` Live, `2` Step, `3` Tracker, `4` Setup, `5` Key test, `s` save song, `b` Bluetooth MIDI, `u` USB MIDI, `m` speaker, `p` top rows mode |
-| `fn` + `m` / `p` / `b` / `u` / `s` | speaker on/off · top rows piano ↔ drums+chords · Bluetooth MIDI · USB MIDI · save song |
+| `` ` `` hold | menu: `1` Live, `2` Step, `3` Tracker, `4` Songs, `5` Setup, `6` Key test, `s` save song, `b` Bluetooth MIDI, `u` USB MIDI, `m` speaker, `p` top rows mode |
+| `fn` + `m` / `p` / `b` / `u` / `s` | speaker on/off · top rows piano ↔ drums+chords · Bluetooth MIDI · USB MIDI · save song (asks for a name the first time) |
 | `fn` + `,` / `/` · `;` / `.` · `t` | tempo −1 / +1 · +10 / −10 · tap tempo |
 
 **Upper piano (fn+p):** the top two rows become a second, higher piano octave in the
@@ -84,7 +88,28 @@ classic tracker layout: `q w e r t y u i o p [ ] \` are white keys (C up to A) a
     (octave, ±16 velocity, ±1 bar of length).
   - `del` clears the value under the cursor (velocity / length / offset go back to
     defaults); on an empty row's note column it inserts OFF.
+  - `FX` column: put the cursor on the letter and press `f`/`l` to pick an effect, then move
+    to its value and use `f`/`l` (hold `shift` for ±16). A message explains the value.
+    `del` removes it. Effects apply to every note on that row:
+
+    | FX | Value | Does |
+    |---|---|---|
+    | `P` | 00–64 (0–100%) | chance the row plays |
+    | `R` | 02–06 | ratchet: that many quick hits inside the step |
+    | `T` | xy | trig condition: plays on loop x of every y (`T12` = every other loop, starting with the first) |
+    | `H` | 00–7F | humanize: velocity varies randomly by up to ± the value |
+    | `M` | 00–7F | sends mod wheel (CC 1) at the row, even without a note |
+    | `B` | 00–7F | sends pitch bend (40 = centre) |
+    | `G` | 00–7F | sends a program change |
+
+    Rows with an effect show its letter on the Step screen too.
   - `'` opens the same track options as the Step screen.
+- **Songs:** the saved songs, sorted by name, with the open one in yellow.
+  `;`/`.` pick, `enter` loads, `s` saves the open song over the selected one, `del` deletes;
+  each asks for a second press to confirm. *Save as new name...* lets you type a name
+  (letters, digits, `-`, space; `shift` for capitals; `del` erases; `enter` saves; tap
+  `` ` `` to cancel). *New empty song* starts fresh. Quick save (hold `` ` `` + `s`, or
+  `fn`+`s`) saves to the open song, or asks for a name if it doesn't have one yet.
 - **Live:** shows what you play. `;`/`.` pick the track your keys play into, `,`/`/` change velocity.
 - **Setup:** MIDI transports, speaker, velocity, tempo, key & scale, piano mode,
   metronome (off / when recording / always), record quantize.
@@ -154,11 +179,11 @@ src/
   input/KeyInput      key list -> press/release events
   music/Theory        scales, chord building and naming
   play/LivePlayer     live notes/chords/drums, held-note bookkeeping
-  seq/Song            song / track / pattern data model, save & load
+  seq/Song            song / track / pattern / effects data model, named save & load
   seq/Engine          clock task, transport, playback, live recording
   midi/MidiOut        sends to every enabled transport
   midi/BleMidi        BLE MIDI peripheral (NimBLE)
   audio/Monitor       speaker preview
   app/BootGuard       startup crash report
-  ui/                 screens (Step, Tracker, Live, Setup, Key test), track options panel, status bar, menu
+  ui/                 screens (Step, Tracker, Live, Songs, Setup, Key test), track options panel + effect helpers, status bar, menu
 ```

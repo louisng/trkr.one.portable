@@ -26,6 +26,8 @@ LinkState usbState();
 void noteOn(uint8_t channel, uint8_t note, uint8_t velocity);
 void noteOff(uint8_t channel, uint8_t note);
 void controlChange(uint8_t channel, uint8_t cc, uint8_t value);
+void pitchBend(uint8_t channel, uint16_t value14);  // 0-16383, 8192 = centre
+void programChange(uint8_t channel, uint8_t program);
 void allNotesOff();  // CC123 on every channel, on every enabled transport
 
 // Counters for the status display.

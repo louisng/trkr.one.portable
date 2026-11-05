@@ -11,6 +11,7 @@ void setEnabled(bool on);            // start/stop advertising, drop connections
 bool enabled();
 bool connected();
 void send(uint8_t status, uint8_t d1, uint8_t d2);
+void send2(uint8_t status, uint8_t d1);  // 2-byte messages (program change)
 void flush();
 
 }  // namespace blemidi

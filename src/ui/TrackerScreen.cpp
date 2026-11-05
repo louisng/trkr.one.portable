@@ -2,13 +2,15 @@
 // value laid bare. It's another view of the same song as the Step screen, so
 // edits show up in both immediately.
 //
-// Per track:  NOTE [NOTE...]  VL  LEN  OF
+// Per track:  NOTE [NOTE...]  VL  LEN  OF  FX
 //   NOTE  one column per chord note (as many as the track's biggest chord)
 //   VL    velocity, hex 01-7F
 //   LEN   note length in steps (.25 .5 1 2 ...)
 //   OF    timing offset in ticks (12 ticks per step)
+//   FX    effect letter + value (hex): P chance, R ratchet, T trig condition,
+//         H humanize, M mod wheel, B pitch bend, G program change
 //
-// Keys: ; . rows   , / columns (scrolls across tracks)
+// Keys: ; . rows (hold opt: 10 at a time)   , / columns (scrolls across tracks)
 //   piano / chord / drum keys: write notes at the cursor, move down a row
 //   f / l: value down / up (note column: transpose a semitone); shift = bigger
 //   del: clear the value (on an empty row: OFF)   ': track options
@@ -31,10 +33,14 @@ static constexpr int ROW_H = 9;
 static constexpr int ROWS_TOP = 34;
 static constexpr int VISIBLE_ROWS = (H - ROWS_TOP) / ROW_H;  // 11
 static constexpr int ROWNUM_W = 14;
-static constexpr int NOTE_W = 20, VEL_W = 14, LEN_W = 20, OFS_W = 14, GAP_W = 4;
+static constexpr int NOTE_W = 20, VEL_W = 14, LEN_W = 20, OFS_W = 14, FXC_W = 8, FXV_W = 14,
+                     GAP_W = 4;
+static constexpr int EXTRA_FIELDS = 5;  // VL LEN OF FX FV
 static constexpr uint8_t IDX_SHIFT = 2 * 14 + 1;
+static constexpr uint8_t IDX_OPT = 3 * 14 + 1;
+static constexpr int JUMP_ROWS = 10;
 
-enum FieldKind : uint8_t { F_NOTE, F_VEL, F_LEN, F_OFS };
+enum FieldKind : uint8_t { F_NOTE, F_VEL, F_LEN, F_OFS, F_FXC, F_FXV };
 
 static uint8_t noteCols(const Pattern& p) {
   uint8_t maxN = 1;
@@ -45,7 +51,9 @@ static uint8_t noteCols(const Pattern& p) {
   return maxN > MAX_NOTES_PER_STEP ? MAX_NOTES_PER_STEP : maxN;
 }
 
-static int trackWidth(uint8_t nc) { return nc * NOTE_W + VEL_W + LEN_W + OFS_W + GAP_W; }
+static int trackWidth(uint8_t nc) {
+  return nc * NOTE_W + VEL_W + LEN_W + OFS_W + FXC_W + FXV_W + GAP_W;
+}
 
 // Notes on a step sorted by pitch, OFF excluded. Returns count; sets *off.
 static uint8_t stepNotes(const Pattern& p, uint8_t step, NoteEvent* out, bool* off) {
@@ -79,8 +87,8 @@ class TrackerScreen : public Screen {
     const uint8_t nc = noteCols(p);
     const bool shift = keys::isDown(IDX_SHIFT);
     switch (a) {
-      case layout::ACT_UP: moveRow(-1, p); break;
-      case layout::ACT_DOWN: moveRow(+1, p); break;
+      case layout::ACT_UP: moveRow(keys::isDown(IDX_OPT) ? -JUMP_ROWS : -1, p); break;
+      case layout::ACT_DOWN: moveRow(keys::isDown(IDX_OPT) ? JUMP_ROWS : 1, p); break;
       case layout::ACT_LEFT: moveField(-1); break;
       case layout::ACT_RIGHT: moveField(+1); break;
       case layout::ACT_OPTIONS: options::open(); break;
@@ -188,15 +196,17 @@ class TrackerScreen : public Screen {
   uint16_t entryLen = TICKS_PER_STEP;
   uint32_t cursorMovedAt = 0;
 
-  int fieldCount(uint8_t t) { return noteCols(song.tracks[t].cur()) + 3; }
+  int fieldCount(uint8_t t) { return noteCols(song.tracks[t].cur()) + EXTRA_FIELDS; }
 
   FieldKind kindOf(int f, uint8_t nc) {
     if (f < nc) return F_NOTE;
-    return f == nc ? F_VEL : f == nc + 1 ? F_LEN : F_OFS;
+    static const FieldKind K[EXTRA_FIELDS] = {F_VEL, F_LEN, F_OFS, F_FXC, F_FXV};
+    int i = f - nc;
+    return i < EXTRA_FIELDS ? K[i] : F_FXV;
   }
 
   void moveRow(int d, const Pattern& p) {
-    row = (row + d + p.length) % p.length;
+    row = ((row + d) % p.length + p.length) % p.length;
     entryRow = -1;
     entryHeld = 0;
     cursorMovedAt = millis();
@@ -247,6 +257,23 @@ class TrackerScreen : public Screen {
       case F_OFS:
         if (n) setStepOffset(p, step, (int8_t)(ev[0].offset + dir));
         break;
+      case F_FXC:
+      case F_FXV: {
+        uint8_t cmd = FX_NONE, val = 0;
+        fxAt(p, step, &cmd, &val);
+        if (kindOf(field, nc) == F_FXC) {
+          cmd = (uint8_t)((cmd + FX_COUNT + dir) % FX_COUNT);  // cycles through "-" too
+          val = fxDefault(cmd);
+        } else {
+          if (cmd == FX_NONE) return;
+          val = fxStepValue(cmd, val, dir, big);
+        }
+        setFx(p, step, cmd, val);
+        char msg[40];
+        fxDescribe(cmd, val, msg, sizeof(msg));
+        toast(msg);
+        break;
+      }
     }
     (void)tr;
   }
@@ -266,6 +293,8 @@ class TrackerScreen : public Screen {
       case F_VEL: setStepVelocity(p, step, settings.velocity); break;
       case F_LEN: setStepLength(p, step, TICKS_PER_STEP); break;
       case F_OFS: setStepOffset(p, step, 0); break;
+      case F_FXC:
+      case F_FXV: setFx(p, step, FX_NONE, 0); break;
     }
   }
 
@@ -308,6 +337,7 @@ class TrackerScreen : public Screen {
     c.drawString("VL", lx + 1, 27);
     c.drawString("LEN", lx + VEL_W + 1, 27);
     c.drawString("OF", lx + VEL_W + LEN_W + 1, 27);
+    c.drawString("FX", lx + VEL_W + LEN_W + OFS_W + 1, 27);
 
     c.setFont(&fonts::Font0);
     for (int i = 0; i < VISIBLE_ROWS; i++) {
@@ -353,6 +383,16 @@ class TrackerScreen : public Screen {
       else snprintf(s, sizeof(s), n ? " 0" : "..");
       cell(c, x, y, OFS_W, s, n && ev[0].offset ? col::ACCENT : col::FAINT,
            cur && r == row && field == nc + 2);
+      x += OFS_W;
+      uint8_t cmd = FX_NONE, val = 0;
+      bool hasFx = fxAt(p, (uint8_t)r, &cmd, &val);
+      s[0] = hasFx ? fxLetter(cmd) : '.';
+      s[1] = 0;
+      cell(c, x, y, FXC_W, s, hasFx ? col::CHORD : col::FAINT, cur && r == row && field == nc + 3);
+      x += FXC_W;
+      if (hasFx) snprintf(s, sizeof(s), "%02X", val);
+      else snprintf(s, sizeof(s), "..");
+      cell(c, x, y, FXV_W, s, hasFx ? col::TEXT : col::FAINT, cur && r == row && field == nc + 4);
     }
     return x0 + w;
   }

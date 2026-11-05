@@ -88,7 +88,8 @@ void releaseTrack(uint8_t t) {
   releaseTrackLocked(t);
 }
 
-static void startNote(uint8_t t, const Track& tr, const NoteEvent& e, uint32_t tick) {
+static void startNote(uint8_t t, const Track& tr, const NoteEvent& e, uint32_t tick,
+                      bool forceShort = false) {
   bool drum = tr.kind == TrackKind::Drum;
   // Retrigger: stop the same pitch on the same channel if it's still sounding.
   Active* slot = nullptr;
@@ -109,13 +110,49 @@ static void startNote(uint8_t t, const Track& tr, const NoteEvent& e, uint32_t t
   } else {
     monitor::noteOn(e.pitch);
   }
-  const bool held = tr.hold && !drum;
+  const bool held = tr.hold && !drum && !forceShort;
   *slot = {true, held, t, tr.channel, e.pitch, drum, tick + (e.len ? e.len : 1)};
+}
+
+// Ratchet repeats waiting for their tick.
+struct Pending {
+  bool used;
+  uint8_t track;
+  uint32_t tick;
+  NoteEvent e;
+};
+static constexpr uint8_t MAX_PENDING = 32;
+static Pending pending[MAX_PENDING];
+
+static void schedule(uint8_t t, uint32_t tick, const NoteEvent& e) {
+  for (auto& q : pending)
+    if (!q.used) {
+      q = {true, t, tick, e};
+      return;
+    }
+}
+
+// Step-level effects that send MIDI on their own (no note needed).
+static void sendStepFx(uint8_t t, const Track& tr, uint8_t cmd, uint8_t val) {
+  switch (cmd) {
+    case FX_MOD: midi::controlChange(tr.channel, 1, val & 0x7F); break;
+    case FX_BEND: midi::pitchBend(tr.channel, (uint16_t)((val & 0x7F) << 7)); break;
+    case FX_PROGRAM: midi::programChange(tr.channel, val & 0x7F); break;
+    default: break;
+  }
+  (void)t;
 }
 
 static void processTick(uint32_t tick) {
   for (auto& a : active)
     if (a.used && !a.held && (int32_t)(tick - a.offTick) >= 0) noteOffActive(a);
+
+  for (auto& q : pending)
+    if (q.used && (int32_t)(tick - q.tick) >= 0) {
+      q.used = false;
+      const Track& tr = song.tracks[q.track];
+      if (!tr.mute) startNote(q.track, tr, q.e, tick, true);
+    }
 
   for (uint8_t t = 0; t < TRACKS; t++) {
     Track& tr = song.tracks[t];
@@ -138,9 +175,45 @@ static void processTick(uint32_t tick) {
       if (e.pitch == PITCH_OFF) offHere = true;
       else if (nf < 8) fire[nf++] = &e;
     }
+    // Effects on the step that starts right now (mod wheel, bend, program).
+    uint8_t cmd = FX_NONE, val = 0;
+    if (rel % TICKS_PER_STEP == 0 && !tr.mute && fxAt(p, (uint8_t)(rel / TICKS_PER_STEP), &cmd, &val))
+      sendStepFx(t, tr, cmd, val);
+
+    if (nf) {
+      // Effects that shape the notes, looked up on the notes' own step.
+      cmd = FX_NONE;
+      fxAt(p, fire[0]->step, &cmd, &val);
+      const int64_t stepStart = (int64_t)tick - fire[0]->offset;
+      const uint32_t loop = (uint32_t)(stepStart / (int64_t)P);
+      bool play = true;
+      if (cmd == FX_CHANCE) play = (uint32_t)random(100) < val;
+      if (cmd == FX_COND) {
+        uint8_t x = val >> 4, y = val & 0x0F;
+        if (y >= 1 && x >= 1) play = (loop % y) == (uint32_t)(x - 1);
+      }
+      if (!play) nf = 0;  // skipped this time: leave whatever is sounding alone
+    }
+
     if (offHere || (nf && tr.hold)) releaseTrackLocked(t);
-    if (!tr.mute)
-      for (uint8_t i = 0; i < nf; i++) startNote(t, tr, *fire[i], tick);
+    if (!tr.mute) {
+      for (uint8_t i = 0; i < nf; i++) {
+        NoteEvent e = *fire[i];
+        if (cmd == FX_HUMANIZE && val) {
+          int v = (int)e.vel + (int)random(-(long)val, (long)val + 1);
+          e.vel = (uint8_t)(v < 1 ? 1 : v > 127 ? 127 : v);
+        }
+        if (cmd == FX_RATCHET && val >= 2) {
+          const uint8_t n = val > 6 ? 6 : val;
+          const uint32_t sub = TICKS_PER_STEP / n;
+          e.len = (uint16_t)(sub > 1 ? sub - 1 : 1);
+          startNote(t, tr, e, tick, true);
+          for (uint8_t k = 1; k < n; k++) schedule(t, tick + k * sub, e);
+        } else {
+          startNote(t, tr, e, tick);
+        }
+      }
+    }
   }
 
   // Metronome on each beat (accent on the bar).
@@ -213,6 +286,7 @@ void stop() {
   for (auto& a : active)
     if (a.used) noteOffActive(a);
   for (auto& r : recHeld) r.used = false;
+  for (auto& q : pending) q.used = false;
   midi::update();
 }
 

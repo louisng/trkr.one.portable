@@ -25,4 +25,11 @@ void formatNoteLength(uint16_t lenTicks, char* out, size_t n);
 // Compact form for the tracker column: ".25" ".5" "1" "16" "1.5"
 void formatNoteLengthShort(uint16_t lenTicks, char* out, size_t n);
 
+// Tracker effects: one-letter name, default value, value stepping, and a
+// plain-language description for the toast shown while editing.
+char fxLetter(uint8_t cmd);
+uint8_t fxDefault(uint8_t cmd);
+uint8_t fxStepValue(uint8_t cmd, uint8_t val, int dir, bool big);
+void fxDescribe(uint8_t cmd, uint8_t val, char* out, size_t n);
+
 }  // namespace ui

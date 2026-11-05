@@ -33,6 +33,17 @@ static constexpr uint32_t MENU_SHOW_DELAY_MS = 180;
 static uint64_t swallowed = 0;  // keys pressed inside the menu: ignore their release
 
 static bool fnHeld = false;
+
+// Held arrow / f / l keys repeat after a short pause.
+static int8_t repeatKey = -1;
+static uint8_t repeatAction = 0;
+static uint32_t repeatAt = 0;
+static constexpr uint32_t REPEAT_DELAY_MS = 350, REPEAT_RATE_MS = 60;
+
+static bool repeatable(uint8_t a) {
+  return a == layout::ACT_UP || a == layout::ACT_DOWN || a == layout::ACT_LEFT ||
+         a == layout::ACT_RIGHT || a == layout::ACT_SHORTER || a == layout::ACT_LONGER;
+}
 static Screen* lastMain = nullptr;  // Step / Tracker / Live: where a tap of ` returns to
 static int lastPlayStep = -2;
 
@@ -40,7 +51,7 @@ static midi::LinkState lastBle, lastUsb;
 static bool adv = false;
 
 // Shortcut keys, looked up by key cap so they follow the layout table.
-static int8_t idxDigit[5];
+static int8_t idxDigit[6];
 static int8_t idxB = -1, idxU = -1, idxM = -1, idxP = -1, idxS = -1, idxT = -1;
 
 static int8_t findCap(const char* cap) {
@@ -94,17 +105,30 @@ static void toggleUpperPiano() {
   toast(settings.upperPiano ? "Top rows: piano (upper octave)" : "Top rows: drums + chords");
 }
 
+// Quick save: to the open song's name, or ask for a name if it has none.
 static void saveSong() {
+  if (!seq::currentSongName()[0]) {
+    songsStartSaveAs();
+    switchTo(songsScreen());
+    return;
+  }
   bool ok = seq::songSave();
-  toast(ok ? "Song saved" : "Save failed");
+  if (ok) {
+    strncpy(settings.lastSong, seq::currentSongName(), sizeof(settings.lastSong) - 1);
+    settings.lastSong[sizeof(settings.lastSong) - 1] = 0;
+  }
+  char msg[40];
+  snprintf(msg, sizeof(msg), ok ? "Saved %s" : "Save failed", seq::currentSongName());
+  toast(msg);
 }
 
 static void handleMenuKey(uint8_t idx) {
   if (idx == idxDigit[0]) switchTo(liveScreen());
   else if (idx == idxDigit[1]) switchTo(stepScreen());
   else if (idx == idxDigit[2]) switchTo(trackerScreen());
-  else if (idx == idxDigit[3]) switchTo(setupScreen());
-  else if (idx == idxDigit[4]) switchTo(keyTestScreen());
+  else if (idx == idxDigit[3]) switchTo(songsScreen());
+  else if (idx == idxDigit[4]) switchTo(setupScreen());
+  else if (idx == idxDigit[5]) switchTo(keyTestScreen());
   else if (idx == idxB) toggleBle();
   else if (idx == idxU) toggleUsb();
   else if (idx == idxM) toggleSpeaker();
@@ -167,6 +191,7 @@ static void handleEvent(const keys::Event& e) {
   const layout::KeyDef& def = layout::keyAt(e.index);
   const uint64_t bit = 1ULL << e.index;
   const bool isAction = def.role == layout::Role::Action;
+  if (!e.pressed && e.index == repeatKey) repeatKey = -1;
 
   if (isAction && def.value == layout::ACT_MENU) {
     if (e.pressed) {
@@ -216,7 +241,14 @@ static void handleEvent(const keys::Event& e) {
       return;
     }
   }
-  if (e.pressed && isAction) current->onAction(def.value);
+  if (e.pressed && isAction) {
+    current->onAction(def.value);
+    if (repeatable(def.value)) {
+      repeatKey = (int8_t)e.index;
+      repeatAction = def.value;
+      repeatAt = millis() + REPEAT_DELAY_MS;
+    }
+  }
 }
 
 // ── Drawing ──────────────────────────────────────────────────────────────────
@@ -273,8 +305,10 @@ static void drawMenu() {
 
   canvas.setTextColor(col::TEXT);
   canvas.drawString("1 Live   2 Step   3 Tracker", x + 8, y + 20);
-  canvas.drawString("4 Setup  5 Key test", x + 8, y + 31);
-  canvas.drawString("s Save song", x + 8, y + 42);
+  canvas.drawString("4 Songs  5 Setup  6 Key test", x + 8, y + 31);
+  char sv[40];
+  snprintf(sv, sizeof(sv), "s Save %s", seq::currentSongName()[0] ? seq::currentSongName() : "as...");
+  canvas.drawString(sv, x + 8, y + 42);
 
   char buf[40];
   snprintf(buf, sizeof(buf), "b Bluetooth MIDI: %s", settings.bleMidi ? "ON" : "off");
@@ -319,7 +353,7 @@ void begin() {
   adv = M5.getBoard() == m5::board_t::board_M5CardputerADV;
   canvas.setColorDepth(16);
   canvas.createSprite(W, H);
-  for (uint8_t i = 0; i < 5; i++) {
+  for (uint8_t i = 0; i < 6; i++) {
     char cap[2] = {(char)('1' + i), 0};
     idxDigit[i] = findCap(cap);
   }
@@ -355,6 +389,22 @@ void tick() {
     lastUsb = u;
     dirty = true;
   }
+  if (repeatKey >= 0 && (int32_t)(now - repeatAt) >= 0) {
+    if (keys::isDown((uint8_t)repeatKey) && !menuHeld && !fnHeld) {
+      seq::Lock l;
+      current->onAction(repeatAction);
+      dirty = true;
+      repeatAt = now + REPEAT_RATE_MS;
+    } else {
+      repeatKey = -1;
+    }
+  }
+  static uint32_t lastAnim = 0;
+  if (current->animating() && now - lastAnim > 200) {
+    lastAnim = now;
+    dirty = true;
+  }
+
   // Follow the playhead.
   int ps = seq::trackStep(seq::selectedTrack());
   if (ps != lastPlayStep) {

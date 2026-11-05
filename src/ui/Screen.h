@@ -43,11 +43,15 @@ class Screen {
   // Every raw key event, before anything else handles it.
   virtual void onRawKey(uint8_t index, bool pressed) {}
   virtual void draw(M5Canvas& c) = 0;
+  // True while the screen needs periodic redraws (blinking cursor etc.).
+  virtual bool animating() const { return false; }
 };
 
 Screen* liveScreen();
 Screen* stepScreen();
 Screen* trackerScreen();
+Screen* songsScreen();
+void songsStartSaveAs();  // call before switching to songsScreen()
 Screen* setupScreen();
 Screen* keyTestScreen();
 

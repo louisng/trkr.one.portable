@@ -81,17 +81,25 @@ void flush() {
   pktLen = 0;
 }
 
-void send(uint8_t status, uint8_t d1, uint8_t d2) {
+static void sendBytes(const uint8_t* msg, uint8_t n) {
   if (!connected()) return;
   size_t maxPayload = peerMtu > 3 ? peerMtu - 3 : 20;
   if (maxPayload > sizeof(pkt)) maxPayload = sizeof(pkt);
-  if (pktLen + 4 > maxPayload) flush();
-  uint16_t ts = (uint16_t)(millis() & 0x1FFF);  // 13-bit ms timestamp
+  if (pktLen + 1 + n > maxPayload) flush();
+  uint16_t ts = (uint16_t)(millis() & 0x1FFF);
   if (pktLen == 0) pkt[pktLen++] = 0x80 | ((ts >> 7) & 0x3F);
   pkt[pktLen++] = 0x80 | (ts & 0x7F);
-  pkt[pktLen++] = status;
-  pkt[pktLen++] = d1 & 0x7F;
-  pkt[pktLen++] = d2 & 0x7F;
+  for (uint8_t i = 0; i < n; i++) pkt[pktLen++] = i == 0 ? msg[0] : (msg[i] & 0x7F);
+}
+
+void send2(uint8_t status, uint8_t d1) {
+  uint8_t m[2] = {status, d1};
+  sendBytes(m, 2);
+}
+
+void send(uint8_t status, uint8_t d1, uint8_t d2) {
+  uint8_t m[3] = {status, d1, d2};
+  sendBytes(m, 3);
 }
 
 }  // namespace blemidi

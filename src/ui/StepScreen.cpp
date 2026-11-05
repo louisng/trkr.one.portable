@@ -11,6 +11,7 @@
 #include <stdio.h>
 
 #include "../app/Settings.h"
+#include "../input/KeyInput.h"
 #include "../input/KeyLayout.h"
 #include "../music/Theory.h"
 #include "../play/LivePlayer.h"
@@ -24,6 +25,7 @@ using namespace seq;
 
 static constexpr int PAGE = 16;
 static constexpr int GRID_TOP = 40;
+static constexpr uint8_t IDX_OPT = 3 * 14 + 1;
 
 class StepScreen : public Screen {
  public:
@@ -42,8 +44,8 @@ class StepScreen : public Screen {
       return;
     }
     switch (a) {
-      case layout::ACT_LEFT: moveCursor(-1, p); break;
-      case layout::ACT_RIGHT: moveCursor(+1, p); break;
+      case layout::ACT_LEFT: moveCursor(keys::isDown(IDX_OPT) ? -10 : -1, p); break;
+      case layout::ACT_RIGHT: moveCursor(keys::isDown(IDX_OPT) ? 10 : 1, p); break;
       case layout::ACT_UP: selectTrack((selectedTrack() + TRACKS - 1) % TRACKS); resetEntry(); break;
       case layout::ACT_DOWN: selectTrack((selectedTrack() + 1) % TRACKS); resetEntry(); break;
       case layout::ACT_DELETE: {
@@ -135,7 +137,7 @@ class StepScreen : public Screen {
   }
 
   void moveCursor(int d, const Pattern& p) {
-    cursor = (cursor + d + p.length) % p.length;
+    cursor = ((cursor + d) % p.length + p.length) % p.length;
     resetEntry();
   }
 
@@ -221,6 +223,14 @@ class StepScreen : public Screen {
         if (x + lenPx > W) lenPx = W - x;
         c.fillRect(x + 1, top + 38, lenPx > 2 ? lenPx : 2, 3, col::ACCENT);
         if (ev[hi].offset) c.fillCircle(x + cw / 2 + (ev[hi].offset > 0 ? 4 : -4), top + 46, 1, col::DIM);
+      }
+      uint8_t fxc = FX_NONE;
+      if (fxAt(p, (uint8_t)s, &fxc, nullptr)) {  // effect marker, edit it in the Tracker
+        char fl[2] = {fxLetter(fxc), 0};
+        c.setFont(&fonts::TomThumb);
+        c.setTextDatum(top_center);
+        c.setTextColor(col::CHORD);
+        c.drawString(fl, x + cw / 2, top + 52);
       }
       if (s == cursor) c.drawRect(x, top, cw - 1, h, TFT_WHITE);
     }

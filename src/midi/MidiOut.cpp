@@ -96,6 +96,23 @@ void controlChange(uint8_t channel, uint8_t cc, uint8_t value) {
   send3(0xB0 | ((channel - 1) & 0x0F), cc & 0x7F, value & 0x7F);
 }
 
+void pitchBend(uint8_t channel, uint16_t v) {
+  if (v > 16383) v = 16383;
+  send3(0xE0 | ((channel - 1) & 0x0F), v & 0x7F, (v >> 7) & 0x7F);
+}
+
+void programChange(uint8_t channel, uint8_t program) {
+  const uint8_t status = 0xC0 | ((channel - 1) & 0x0F);
+  sentCount++;
+  blemidi::send2(status, program & 0x7F);
+#if HAS_USB_MIDI
+  if (usbOn && usbMounted()) {
+    midiEventPacket_t p = {0x0C, status, (uint8_t)(program & 0x7F), 0};
+    usbMidi.writePacket(&p);
+  }
+#endif
+}
+
 void allNotesOff() {
   for (uint8_t ch = 1; ch <= 16; ch++) controlChange(ch, 123, 0);
   blemidi::flush();

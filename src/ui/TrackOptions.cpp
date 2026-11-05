@@ -36,6 +36,64 @@ void formatNoteLengthShort(uint16_t len, char* out, size_t n) {
   else snprintf(out, n, "%.1f", (float)len / T);
 }
 
+// ── Effects ──────────────────────────────────────────────────────────────────
+char fxLetter(uint8_t cmd) {
+  static const char L[FX_COUNT] = {'-', 'P', 'R', 'T', 'H', 'M', 'B', 'G'};
+  return cmd < FX_COUNT ? L[cmd] : '?';
+}
+
+uint8_t fxDefault(uint8_t cmd) {
+  switch (cmd) {
+    case FX_CHANCE: return 50;
+    case FX_RATCHET: return 2;
+    case FX_COND: return 0x12;  // 1st of every 2 loops
+    case FX_HUMANIZE: return 16;
+    case FX_MOD: return 64;
+    case FX_BEND: return 0x40;
+    default: return 0;
+  }
+}
+
+// Trig conditions x:y (play on the x-th of every y loops), in order.
+static uint8_t condIndex(uint8_t val) {
+  uint8_t i = 0;
+  for (uint8_t y = 2; y <= 8; y++)
+    for (uint8_t x = 1; x <= y; x++, i++)
+      if (val == ((x << 4) | y)) return i;
+  return 0;
+}
+static uint8_t condAt(int idx) {
+  const int count = 35;  // sum of 2..8
+  idx = ((idx % count) + count) % count;
+  int i = 0;
+  for (uint8_t y = 2; y <= 8; y++)
+    for (uint8_t x = 1; x <= y; x++, i++)
+      if (i == idx) return (uint8_t)((x << 4) | y);
+  return 0x12;
+}
+
+uint8_t fxStepValue(uint8_t cmd, uint8_t val, int dir, bool big) {
+  if (cmd == FX_COND) return condAt(condIndex(val) + dir * (big ? 5 : 1));
+  int lo = 0, hi = 127;
+  if (cmd == FX_CHANCE) hi = 100;
+  if (cmd == FX_RATCHET) { lo = 2; hi = 6; big = false; }
+  int v = (int)val + dir * (big ? 16 : 1);
+  return (uint8_t)(v < lo ? lo : v > hi ? hi : v);
+}
+
+void fxDescribe(uint8_t cmd, uint8_t val, char* out, size_t n) {
+  switch (cmd) {
+    case FX_CHANCE: snprintf(out, n, "P: plays %d%% of the time", val); break;
+    case FX_RATCHET: snprintf(out, n, "R: %d hits in the step", val); break;
+    case FX_COND: snprintf(out, n, "T: plays loop %d of every %d", val >> 4, val & 0x0F); break;
+    case FX_HUMANIZE: snprintf(out, n, "H: velocity +/- %d", val); break;
+    case FX_MOD: snprintf(out, n, "M: mod wheel = %d", val); break;
+    case FX_BEND: snprintf(out, n, "B: pitch bend %+d", (int)val - 64); break;
+    case FX_PROGRAM: snprintf(out, n, "G: program change %d", val); break;
+    default: snprintf(out, n, "No effect"); break;
+  }
+}
+
 namespace options {
 
 enum Opt : uint8_t {
