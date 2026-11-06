@@ -52,7 +52,7 @@ static bool adv = false;
 
 // Shortcut keys, looked up by key cap so they follow the layout table.
 static int8_t idxDigit[10];
-static int8_t idxB = -1, idxU = -1, idxM = -1, idxP = -1, idxS = -1, idxT = -1;
+static int8_t idxB = -1, idxU = -1, idxM = -1, idxP = -1, idxS = -1, idxT = -1, idxX = -1;
 
 static int8_t findCap(const char* cap) {
   for (uint8_t r = 0; r < layout::ROWS; r++)
@@ -143,6 +143,17 @@ static void handleMenuKey(uint8_t idx) {
   else if (idx == idxS) saveSong();
 }
 
+// fn + x: mute / unmute the selected track (what the sequencer plays on it).
+static void toggleTrackMute() {
+  const uint8_t t = seq::selectedTrack();
+  seq::Track& tr = seq::song.tracks[t];
+  tr.mute = !tr.mute;
+  if (tr.mute) seq::releaseTrack(t);  // cut anything it's still sounding
+  char msg[32];
+  snprintf(msg, sizeof(msg), "Track %d %s %s", t + 1, tr.name, tr.mute ? "muted" : "unmuted");
+  toast(msg);
+}
+
 static void changeTempo(int d) {
   int b = seq::song.bpm + d;
   seq::song.bpm = (uint16_t)(b < seq::BPM_MIN ? seq::BPM_MIN : b > seq::BPM_MAX ? seq::BPM_MAX : b);
@@ -175,6 +186,7 @@ static void handleFnKey(uint8_t idx) {
   else if (idx == idxB) toggleBle();
   else if (idx == idxU) toggleUsb();
   else if (idx == idxS) saveSong();
+  else if (idx == idxX) toggleTrackMute();
 }
 
 // space / enter work on every screen that plays music.
@@ -342,7 +354,7 @@ static void drawMenu() {
   snprintf(buf, sizeof(buf), "p Top: %s", settings.upperPiano ? "piano" : "drum+chd");
   canvas.drawString(buf, x + 110, y + 82);
   canvas.setTextColor(col::DIM);
-  canvas.drawString("fn + m p b u s: same", x + 8, y + 94);
+  canvas.drawString("fn+ m p b u s: same, x: mute trk", x + 8, y + 94);
   canvas.drawString("fn + arrows / t: tempo", x + 8, y + 103);
 }
 
@@ -387,6 +399,7 @@ void begin() {
   idxP = findCap("p");
   idxS = findCap("s");
   idxT = findCap("t");
+  idxX = findCap("x");
   layout::setUpperPiano(settings.upperPiano);
   lastBle = midi::bleState();
   lastUsb = midi::usbState();
