@@ -143,9 +143,10 @@ static void handleMenuKey(uint8_t idx) {
   else if (idx == idxS) saveSong();
 }
 
-// fn + x: mute / unmute the selected track (what the sequencer plays on it).
-static void toggleTrackMute() {
-  const uint8_t t = seq::selectedTrack();
+// Mute / unmute a track (what the sequencer plays on it).
+// fn + x: the selected track. fn + 1-8: track 1-8 (1 is the drum track by default).
+static void toggleTrackMute(uint8_t t) {
+  if (t >= seq::TRACKS) return;
   seq::Track& tr = seq::song.tracks[t];
   tr.mute = !tr.mute;
   if (tr.mute) seq::releaseTrack(t);  // cut anything it's still sounding
@@ -173,6 +174,12 @@ static void handleFnKey(uint8_t idx) {
       default: break;
     }
   }
+  for (uint8_t t = 0; t < seq::TRACKS; t++) {
+    if (idx == idxDigit[t]) {  // number row keys 1-8
+      toggleTrackMute(t);
+      return;
+    }
+  }
   if (idx == idxT) {
     uint8_t n = seq::tapTempo();
     char msg[24];
@@ -186,7 +193,7 @@ static void handleFnKey(uint8_t idx) {
   else if (idx == idxB) toggleBle();
   else if (idx == idxU) toggleUsb();
   else if (idx == idxS) saveSong();
-  else if (idx == idxX) toggleTrackMute();
+  else if (idx == idxX) toggleTrackMute(seq::selectedTrack());
 }
 
 // space / enter work on every screen that plays music.
@@ -354,8 +361,8 @@ static void drawMenu() {
   snprintf(buf, sizeof(buf), "p Top: %s", settings.upperPiano ? "piano" : "drum+chd");
   canvas.drawString(buf, x + 110, y + 82);
   canvas.setTextColor(col::DIM);
-  canvas.drawString("fn+ m p b u s: same, x: mute trk", x + 8, y + 94);
-  canvas.drawString("fn + arrows / t: tempo", x + 8, y + 103);
+  canvas.drawString("fn+ m p b u s: same  fn+1-8: mute", x + 8, y + 94);
+  canvas.drawString("fn+x mute sel  fn+arrows/t tempo", x + 8, y + 103);
 }
 
 static void drawToast() {
