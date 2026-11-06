@@ -61,7 +61,7 @@ Row 4  ct op alt z  x  c  v  b  n  m  ,  .  /  space     piano white keys
 | `'` | Step screen: pattern & track options |
 | `del` | Step screen: clear the step under the cursor; on an empty step, insert **OFF** (stops held notes) |
 | `` ` `` tap | cycle Step → Tracker → Live |
-| `` ` `` hold | menu: `1` Live, `2` Step, `3` Tracker, `4` Scenes, `5` Arrange, `6` Songs, `7` Setup, `8` Key test, `9` Synth, `0` Drum MIDI, `s` save song, `b` Bluetooth MIDI, `u` USB MIDI, `m` speaker, `p` top rows mode |
+| `` ` `` hold | menu: `1` Live, `2` Step, `3` Tracker, `4` Scenes, `5` Arrange, `6` Songs, `7` Setup, `8` Key test, `9` Synth, `0` Drum MIDI, `c` connect a Bluetooth device, `s` save song, `b` Bluetooth MIDI, `u` USB MIDI, `m` speaker, `p` top rows mode |
 | `fn` + `m` / `p` / `b` / `u` / `s` | speaker on/off · top rows piano ↔ drums+chords · Bluetooth MIDI · USB MIDI · save song (asks for a name the first time) |
 | `fn` + `,` / `/` · `;` / `.` · `t` | tempo −1 / +1 · +10 / −10 · tap tempo |
 | `fn` + `x` | mute / unmute the selected track |
@@ -155,6 +155,16 @@ classic tracker layout: `q w e r t y u i o p [ ] \` are white keys (C up to A) a
     each drum's channel (`,`/`/`) and note (`f`/`l`, `shift` = octave). Hitting a drum pad
     jumps to its row.
   - Saved with the song.
+- **Connect** (hold `` ` `` + `c`, or Setup → *Connect to BT device*): for Bluetooth MIDI
+  devices that don't connect to you but wait to be connected to.
+  - Put the device in discoverable / pairing mode, choose **Scan for devices**, then pick
+    it and press `enter`. Devices advertising BLE MIDI are marked `MIDI` and listed first;
+    the number is signal strength.
+  - The device is remembered: with **Reconnect at power-on** on (default), the Cardputer
+    keeps reconnecting to it in the background whenever it's not connected, including
+    after a restart. **Disconnect** stops that until the next power-on.
+  - Phones / computers can still connect to the Cardputer at the same time; MIDI goes to
+    everything connected, and the BLE light shows green if anything is.
 - **Songs:** the saved songs, sorted by name, with the open one in yellow.
   `;`/`.` pick, `enter` loads, `s` saves the open song over the selected one, `del` deletes;
   each asks for a second press to confirm. `'` switches between the **FLASH** and

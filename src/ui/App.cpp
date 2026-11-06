@@ -5,6 +5,7 @@
 #include "../audio/Synth.h"
 #include "../input/KeyInput.h"
 #include "../input/KeyLayout.h"
+#include "../midi/BleMidi.h"
 #include "../midi/MidiOut.h"
 #include "../music/Theory.h"
 #include "../play/LivePlayer.h"
@@ -52,7 +53,7 @@ static bool adv = false;
 
 // Shortcut keys, looked up by key cap so they follow the layout table.
 static int8_t idxDigit[10];
-static int8_t idxB = -1, idxU = -1, idxM = -1, idxP = -1, idxS = -1, idxT = -1, idxX = -1;
+static int8_t idxB = -1, idxU = -1, idxM = -1, idxP = -1, idxS = -1, idxT = -1, idxX = -1, idxC = -1;
 
 static int8_t findCap(const char* cap) {
   for (uint8_t r = 0; r < layout::ROWS; r++)
@@ -84,10 +85,54 @@ static void switchTo(Screen* s) {
 
 void goTo(Screen* s) { switchTo(s); }
 
+void applyBtAuto() {
+  if (settings.bleMidi && settings.btAuto && settings.btAddr[0]) {
+    blemidi::Found f{};
+    strncpy(f.name, settings.btName, sizeof(f.name) - 1);
+    strncpy(f.addr, settings.btAddr, sizeof(f.addr) - 1);
+    f.addrType = settings.btAddrType;
+    blemidi::setAutoReconnect(&f);
+  } else {
+    blemidi::setAutoReconnect(nullptr);
+  }
+}
+
 static void toggleBle() {
   settings.bleMidi = !settings.bleMidi;
   midi::setBleEnabled(settings.bleMidi);
+  applyBtAuto();
   toast(settings.bleMidi ? "Bluetooth MIDI on" : "Bluetooth MIDI off");
+}
+
+// Notices connections made / lost / failed on the Connect screen (or by
+// auto-reconnect), remembers the device, and says what happened.
+static void watchRemote() {
+  static blemidi::RemoteState last = blemidi::RemoteState::Idle;
+  static bool wasConnected = false;
+  const blemidi::RemoteState st = blemidi::remoteState();
+  const bool conn = blemidi::remoteConnected();
+  char msg[48];
+  if (conn && !wasConnected) {
+    blemidi::Found d = blemidi::connectedDevice();
+    if (strcmp(settings.btAddr, d.addr) != 0 || strcmp(settings.btName, d.name) != 0) {
+      strncpy(settings.btAddr, d.addr, sizeof(settings.btAddr) - 1);
+      strncpy(settings.btName, d.name, sizeof(settings.btName) - 1);
+      settings.btAddrType = d.addrType;
+      settingsSave();
+      applyBtAuto();
+    }
+    snprintf(msg, sizeof(msg), "Connected to %s", d.name);
+    toast(msg);
+  } else if (!conn && wasConnected && st != blemidi::RemoteState::Connecting &&
+             !blemidi::droppedByUser()) {
+    snprintf(msg, sizeof(msg), "Lost %s", blemidi::remoteName());
+    toast(msg);
+  } else if (st == blemidi::RemoteState::Failed && last != blemidi::RemoteState::Failed) {
+    toast(blemidi::lastError());
+  }
+  if (conn != wasConnected || st != last) markDirty();
+  wasConnected = conn;
+  last = st;
 }
 static void toggleUsb() {
   settings.usbMidi = !settings.usbMidi;
@@ -137,6 +182,7 @@ static void handleMenuKey(uint8_t idx) {
   else if (idx == idxDigit[7]) switchTo(keyTestScreen());
   else if (idx == idxDigit[8]) switchTo(synthScreen());
   else if (idx == idxDigit[9]) switchTo(drumMidiScreen());
+  else if (idx == idxC) switchTo(connectScreen());
   else if (idx == idxB) toggleBle();
   else if (idx == idxU) toggleUsb();
   else if (idx == idxM) toggleSpeaker();
@@ -349,6 +395,7 @@ static void drawMenu() {
   canvas.setTextColor(col::TEXT);
   for (int i = 0; i < 9; i++) canvas.drawString(SCREENS[i], x + 8 + (i % 3) * 68, y + 19 + (i / 3) * 10);
   canvas.drawString(SCREENS[9], x + 8, y + 49);  // fourth row
+  canvas.drawString("c Connect BT", x + 8 + 2 * 68, y + 49);
 
   char buf[40];
   snprintf(buf, sizeof(buf), "s Save %s", seq::currentSongName()[0] ? seq::currentSongName() : "as...");
@@ -408,6 +455,8 @@ void begin() {
   idxS = findCap("s");
   idxT = findCap("t");
   idxX = findCap("x");
+  idxC = findCap("c");
+  applyBtAuto();  // reconnect the remembered Bluetooth device
   layout::setUpperPiano(settings.upperPiano);
   lastBle = midi::bleState();
   lastUsb = midi::usbState();
@@ -426,6 +475,7 @@ void tick() {
   }
 
   uint32_t now = millis();
+  watchRemote();
   midi::LinkState b = midi::bleState(), u = midi::usbState();
   if (b != lastBle || u != lastUsb) {
     if (b == midi::LinkState::Connected && lastBle != b) toast("Bluetooth MIDI connected");

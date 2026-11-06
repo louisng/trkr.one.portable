@@ -18,6 +18,12 @@ struct Settings {
   char lastSong[17] = "";  // song loaded at power-on
   bool clockOut = true;    // send MIDI clock + start/stop while playing
   bool lastSongOnSd = false;  // lastSong lives on the SD card
+  // Bluetooth MIDI device we connect out to (Connect screen), reconnected
+  // automatically while btAuto is on.
+  char btAddr[18] = "";
+  char btName[24] = "";
+  uint8_t btAddrType = 0;
+  bool btAuto = true;
   // New fields go at the end: older saved settings still load (the new
   // fields keep their defaults).
 };
