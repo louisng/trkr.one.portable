@@ -201,6 +201,9 @@ pio run -t upload       # flash
 pio device monitor      # serial log
 ```
 
+Flashing an update keeps your songs **and** settings (including which song to reopen at
+power-on): both live in the storage partition, which the firmware image doesn't touch.
+
 The firmware uses the ESP32-S3's native USB as a USB MIDI device *and* a serial
 port. If an upload can't find or reset the board, put it in download mode:
 hold **G0** (the button on the side) while plugging in USB, or while pressing
