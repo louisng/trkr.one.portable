@@ -1,3 +1,6 @@
 .pio/
 .vscode/
 release/
+
+test/host/song_test
+test/host/roundtrip.trk

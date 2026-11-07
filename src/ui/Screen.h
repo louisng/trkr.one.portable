@@ -44,6 +44,8 @@ class Screen {
 Screen* liveScreen();
 Screen* setupScreen();
 Screen* keyTestScreen();
+Screen* songsScreen();
+Screen* cloudScreen();
 
 // Shared helpers (App.cpp)
 void toast(const char* msg);
