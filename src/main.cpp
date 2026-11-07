@@ -6,6 +6,9 @@
 #include "audio/Monitor.h"
 #include "input/KeyInput.h"
 #include "midi/MidiOut.h"
+#include "net/Cloud.h"
+#include "play/Sequencer.h"
+#include "song/SongStore.h"
 #include "play/LivePlayer.h"
 #include "ui/Ui.h"
 
@@ -24,11 +27,16 @@ void setup() {
   midi::begin(settings.bleMidi, settings.usbMidi);
   keys::begin();
   player::begin();
+  store::begin();
+  cloud::begin();
+  seq::begin();
   ui::begin();
 }
 
 void loop() {
   M5Cardputer.update();  // scans the keyboard
+  seq::update();         // song playback (before and after the redraw)
   ui::tick();            // key events -> notes / screens, redraw when needed
+  seq::update();
   midi::update();        // sends this pass's BLE MIDI packet
 }

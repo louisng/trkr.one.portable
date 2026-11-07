@@ -6,6 +6,7 @@
 #include "../input/KeyLayout.h"
 #include "../music/Theory.h"
 #include "../play/LivePlayer.h"
+#include "../play/Sequencer.h"
 #include "Screen.h"
 
 namespace ui {
@@ -85,9 +86,14 @@ class LiveScreen : public Screen {
       case layout::ACT_RIGHT:
         settings.root = (settings.root + 1) % 12;
         break;
-      case layout::ACT_ENTER:
       case layout::ACT_PLAY:
-        toast("Sequencer arrives in phase 2");
+        // Play / stop the song loaded on the Songs screen, to jam along.
+        if (!seq::loaded()) toast("Load a song first (hold ` > 4)");
+        else if (seq::playing()) seq::stop();
+        else seq::play(0);
+        break;
+      case layout::ACT_ENTER:
+        toast("Recording comes with the step sequencer");
         break;
       default:
         break;

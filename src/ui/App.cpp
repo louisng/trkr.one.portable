@@ -34,7 +34,7 @@ static midi::LinkState lastBle, lastUsb;
 static bool adv = false;
 
 // Menu shortcut keys, looked up by key cap so they follow the layout table.
-static int8_t idxDigit[3];
+static int8_t idxDigit[5];
 static int8_t idxB = -1, idxU = -1, idxM = -1;
 
 static int8_t findCap(const char* cap) {
@@ -84,6 +84,8 @@ static void handleMenuKey(uint8_t idx) {
   if (idx == idxDigit[0]) switchTo(liveScreen());
   else if (idx == idxDigit[1]) switchTo(setupScreen());
   else if (idx == idxDigit[2]) switchTo(keyTestScreen());
+  else if (idx == idxDigit[3]) switchTo(songsScreen());
+  else if (idx == idxDigit[4]) switchTo(cloudScreen());
   else if (idx == idxB) toggleBle();
   else if (idx == idxU) toggleUsb();
   else if (idx == idxM) toggleSpeaker();
@@ -163,11 +165,10 @@ static void drawMenu() {
   canvas.drawString("MENU  (hold `, press a key)", x + 8, y + 7);
 
   canvas.setTextColor(col::TEXT);
-  canvas.drawString("1  Live play", x + 8, y + 24);
-  canvas.drawString("2  Setup", x + 8, y + 36);
-  canvas.drawString("3  Key test", x + 8, y + 48);
+  canvas.drawString("1 Live   2 Setup   3 Key test", x + 8, y + 24);
+  canvas.drawString("4 Songs  5 Cloud (trkr.one)", x + 8, y + 36);
   canvas.setTextColor(col::DIM);
-  canvas.drawString("Step/Tracker/Song: coming soon", x + 8, y + 60);
+  canvas.drawString("Songs play over MIDI + speaker", x + 8, y + 52);
 
   char buf[32];
   canvas.setTextColor(col::TEXT);
@@ -208,6 +209,8 @@ void begin() {
   idxDigit[0] = findCap("1");
   idxDigit[1] = findCap("2");
   idxDigit[2] = findCap("3");
+  idxDigit[3] = findCap("4");
+  idxDigit[4] = findCap("5");
   idxB = findCap("b");
   idxU = findCap("u");
   idxM = findCap("m");

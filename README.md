@@ -15,6 +15,32 @@ USB MIDI sequencer for the Arduboy.
 - Simple speaker preview so you can hear what you play without a host
 - Key-test screen to see how many keys your unit can read at once (ghosting)
 - Settings saved to flash
+- Songs from trkr.one: sync over WiFi, play over MIDI and the speaker (see below)
+
+## Songs and trkr.one sync
+
+The Cardputer can play songs made on [trkr.one](https://trkr.one) — in its
+tracker, or by its generator — and keeps them on its flash.
+
+- **Hold `` ` `` → 5 Cloud**: set up WiFi (type the network name and password),
+  then **Link trkr.one account**. The screen shows a code like `BKDT-7Q2M`;
+  open **trkr.one/link** on a phone or computer, sign in and type it. The
+  device links itself a few seconds later.
+- **Sync songs now** downloads new and changed songs, removes ones you deleted
+  online, and uploads songs changed on the device (tempo for now). If a song
+  changed in both places, both versions are kept.
+- **Hold `` ` `` → 4 Songs**: `;`/`.` select, `enter` load and play, `space`
+  play/stop, `,`/`/` tempo, `del` twice to delete from the device. The keyboard
+  still plays live on top, and `space` on the Live screen starts/stops the
+  loaded song too.
+
+Songs play over USB/BLE MIDI on each track's channel and through the speaker
+preview. Device links can be removed on trkr.one → Account.
+
+HTTPS uses the root certificates built into ESP-IDF, so the device checks it
+is talking to the real trkr.one. Songs are read and written in the `TRKR 1`
+line format (`src/song/Song.*`), which trkr.one serves to devices and can also
+export as a `.trk` file. `test/host/run.sh song.trk` checks the parser on a PC.
 
 ## Keyboard
 
@@ -37,8 +63,8 @@ Row 4  ct op alt z  x  c  v  b  n  m  ,  .  /  space     piano white keys
 | `1` … `=` | drum pads: kick, snare, rim, clap, closed hat, open hat, low/mid/high tom, crash, ride, cowbell |
 | `;` `.` `,` `/` | cursor up / down / left / right (no fn needed) |
 | `` ` `` tap | back to Live |
-| `` ` `` hold | menu: `1` Live, `2` Setup, `3` Key test, `b` toggle Bluetooth MIDI, `u` toggle USB MIDI, `m` toggle speaker |
-| `enter` / `space` | record / play (sequencer, phase 2) |
+| `` ` `` hold | menu: `1` Live, `2` Setup, `3` Key test, `4` Songs, `5` Cloud, `b` toggle Bluetooth MIDI, `u` toggle USB MIDI, `m` toggle speaker |
+| `space` | play / stop the song loaded on the Songs screen |
 | `f` `l` `'` | free for now |
 
 On the **Live** screen: `;`/`.` change velocity, `,`/`/` change the key's root note.
@@ -96,5 +122,9 @@ src/
   midi/MidiOut        sends to every enabled transport
   midi/BleMidi        BLE MIDI peripheral (NimBLE)
   audio/Monitor       speaker preview
-  ui/                 screens, status bar, menu
+  play/Sequencer      plays a song: arrangement, micro-timing, swing, lengths
+  song/Song           song model + TRKR 1 line-format parser/writer
+  song/SongStore      songs on flash (LittleFS) + sync bookkeeping
+  net/Cloud           WiFi, account linking (device code), two-way sync
+  ui/                 screens (Live, Setup, Key test, Songs, Cloud), status bar, menu
 ```
