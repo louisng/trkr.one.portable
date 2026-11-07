@@ -33,6 +33,9 @@ void unlink();
 
 bool busy();
 void startLink();             // background: WiFi → code → wait for approval
+// background: WiFi → sign in with email + password. Only the resulting
+// token is kept; the password is wiped as soon as the request is sent.
+void startLogin(const char* email, const char* password);
 void startSync();             // background: WiFi → two-way song sync
 void cancel();
 

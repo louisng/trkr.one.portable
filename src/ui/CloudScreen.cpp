@@ -1,4 +1,5 @@
-// Cloud: WiFi, linking to a trkr.one account, and song sync.
+// Cloud: WiFi, signing in to trkr.one (email + password, or a link code),
+// and song sync.
 //   ; .  move     enter  choose
 // WiFi setup asks for the network name and password with the keyboard
 // (shift for capitals and symbols, del to erase, enter to confirm).
@@ -61,12 +62,13 @@ class CloudScreen : public Screen {
     c.setTextDatum(top_left);
     if (mode != Mode::Menu) {
       c.setTextColor(col::ACCENT);
-      c.drawString(mode == Mode::Ssid ? "WiFi network name:" : "WiFi password:", 8, 22);
+      c.drawString(mode == Mode::Ssid ? "WiFi network name:" : mode == Mode::Pass ? "WiFi password:"
+                   : mode == Mode::Email ? "trkr.one email:" : "trkr.one password:", 8, 22);
       c.fillRect(6, 36, W - 12, 16, col::BAR);
       c.setTextColor(col::TEXT);
       char shown[72];
       size_t n = strlen(field);
-      if (mode == Mode::Pass) {
+      if (mode == Mode::Pass || mode == Mode::LoginPass) {
         for (size_t i = 0; i < n; i++) shown[i] = i + 1 == n ? field[i] : '*';
         shown[n] = 0;
       } else strcpy(shown, field);
@@ -100,39 +102,43 @@ class CloudScreen : public Screen {
     const char* labels[ITEMS];
     char l0[40], l1[40];
     snprintf(l0, sizeof(l0), "WiFi: %s", cloud::hasWifi() ? cloud::ssid() : "set up...");
-    snprintf(l1, sizeof(l1), "%s", cloud::linked() ? cloud::email() : "Link trkr.one account");
+    snprintf(l1, sizeof(l1), "%s", cloud::linked() ? cloud::email() : "Sign in with email");
     labels[0] = l0;
     labels[1] = l1;
-    labels[2] = "Sync songs now";
-    labels[3] = cloud::linked() ? "Unlink this device" : "(not linked)";
+    // Signed out: sign in with email, or link with a code from trkr.one/link.
+    labels[2] = cloud::linked() ? "Link a different account (code)" : "...or link with a code";
+    labels[3] = "Sync songs now";
+    labels[4] = cloud::linked() ? "Sign out of this device" : "(not signed in)";
     for (int i = 0; i < ITEMS; i++) {
       int y = 20 + i * 14;
       if (i == sel) c.fillRect(0, y - 2, W, 13, col::SELECT);
-      c.setTextColor(i == 3 && !cloud::linked() ? col::FAINT : col::TEXT);
+      bool off = !cloud::linked() && (i == 3 || i == 4);
+      c.setTextColor(off ? col::FAINT : i == 1 && cloud::linked() ? col::OK : col::TEXT);
       c.drawString(labels[i], 8, y);
     }
     c.setTextColor(cloud::state() == cloud::State::Failed ? col::DRUM
                    : cloud::busy() ? col::ACCENT : col::OK);
-    c.drawString(cloud::message(), 8, 82);
+    c.drawString(cloud::message(), 8, 92);
     c.setTextColor(col::DIM);
     if (cloud::lastSyncMs()) {
       snprintf(buf, sizeof(buf), "last sync %lus ago", (unsigned long)((millis() - cloud::lastSyncMs()) / 1000));
-      c.drawString(buf, 8, 94);
+      c.drawString(buf, 8, 104);
     }
     c.drawString(cloud::busy() ? "enter = cancel" : ";. move  enter choose", 8, H - 14);
   }
 
  private:
-  enum class Mode : uint8_t { Menu, Ssid, Pass };
-  static constexpr int ITEMS = 4;
+  enum class Mode : uint8_t { Menu, Ssid, Pass, Email, LoginPass };
+  static constexpr int ITEMS = 5;
   Mode mode = Mode::Menu;
   int sel = 0;
   char field[65] = "";
   char newSsid[33] = "";
+  char newEmail[64] = "";
 
   void append(char ch) {
     size_t n = strlen(field);
-    size_t max = mode == Mode::Ssid ? 32 : 64;
+    size_t max = mode == Mode::Ssid ? 32 : mode == Mode::Email ? 63 : 64;
     if (n < max) {
       field[n] = ch;
       field[n + 1] = 0;
@@ -145,6 +151,15 @@ class CloudScreen : public Screen {
       strcpy(newSsid, field);
       field[0] = 0;
       mode = Mode::Pass;
+    } else if (mode == Mode::Email) {
+      if (!strchr(field, '@')) { toast("That doesn't look like an email"); return; }
+      strncpy(newEmail, field, sizeof(newEmail) - 1);
+      field[0] = 0;
+      mode = Mode::LoginPass;
+    } else if (mode == Mode::LoginPass) {
+      cloud::startLogin(newEmail, field);
+      memset(field, 0, sizeof(field));  // don't keep the password around
+      mode = Mode::Menu;
     } else {
       cloud::setWifi(newSsid, field);
       field[0] = 0;
@@ -163,16 +178,22 @@ class CloudScreen : public Screen {
         mode = Mode::Ssid;
         strncpy(field, cloud::ssid(), sizeof(field) - 1);
         break;
-      case 1:
+      case 1:  // sign in with email + password
+        if (cloud::linked()) { toast("Signed in - sign out below to change"); break; }
+        if (!cloud::hasWifi()) { toast("Set up WiFi first"); break; }
+        mode = Mode::Email;
+        strncpy(field, newEmail, sizeof(field) - 1);
+        break;
+      case 2:  // link with a code from trkr.one/link
         if (!cloud::hasWifi()) { toast("Set up WiFi first"); break; }
         cloud::startLink();
         break;
-      case 2:
-        if (!cloud::linked()) { toast("Link your account first"); break; }
+      case 3:
+        if (!cloud::linked()) { toast("Sign in first"); break; }
         cloud::startSync();
         break;
-      case 3:
-        if (cloud::linked()) { cloud::unlink(); toast("Unlinked"); }
+      case 4:
+        if (cloud::linked()) { cloud::unlink(); toast("Signed out"); }
         break;
     }
   }

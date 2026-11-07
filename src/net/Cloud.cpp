@@ -31,7 +31,8 @@ static TaskHandle_t task = nullptr;
 static uint32_t syncedAt = 0;
 static uint16_t nDown = 0, nUp = 0;
 
-enum class Job : uint8_t { Link, Sync };
+enum class Job : uint8_t { Link, Login, Sync };
+static char loginEmail[64] = "", loginPass[72] = "";
 static Job job;
 
 static void setMsg(const char* m) {
@@ -190,6 +191,43 @@ static bool doLink() {
   return false;
 }
 
+// ── sign in with email + password ────────────────────────────────────────────
+static String urlEncode(const char* s) {
+  String out;
+  for (; *s; s++) {
+    char c = *s;
+    if (isalnum((unsigned char)c) || c == '-' || c == '_' || c == '.' || c == '~') out += c;
+    else { char b[4]; snprintf(b, sizeof(b), "%%%02X", (unsigned char)c); out += b; }
+  }
+  return out;
+}
+
+static bool doLogin() {
+  st = State::Linking;
+  setMsg("Signing in...");
+  Http h;
+  if (!h.open("/api/auth/device-login", false)) { setMsg("Can't reach server"); return false; }
+  h.http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+  String body = String("email=") + urlEncode(loginEmail) + "&password=" + urlEncode(loginPass) + "&label=Cardputer";
+  memset(loginPass, 0, sizeof(loginPass));
+  int rc = h.http.POST(body);
+  body = "";
+  String resp = h.http.getString();
+  h.http.end();
+  if (rc == 200) {
+    strncpy(cfgToken, kv(resp, "token").c_str(), sizeof(cfgToken) - 1);
+    strncpy(cfgEmail, kv(resp, "email").c_str(), sizeof(cfgEmail) - 1);
+    savePref("token", cfgToken);
+    savePref("email", cfgEmail);
+    snprintf(msg, sizeof(msg), "Signed in as %s", cfgEmail);
+    return true;
+  }
+  if (rc == 401) setMsg("Wrong email or password");
+  else if (rc == 429) setMsg("Too many tries - wait 15 min");
+  else snprintf(msg, sizeof(msg), "Sign-in failed (HTTP %d)", rc);
+  return false;
+}
+
 // ── sync ─────────────────────────────────────────────────────────────────────
 struct Remote {
   String id;
@@ -329,10 +367,12 @@ static void worker(void*) {
   if (!hasWifi()) setMsg("Set up WiFi first");
   else if (wifiUp()) {
     if (job == Job::Link) ok = doLink();
+    else if (job == Job::Login) ok = doLogin();
     else if (!linked()) setMsg("Link your account first");
     else ok = doSync();
   }
   if (cancelReq) setMsg("Cancelled");
+  memset(loginPass, 0, sizeof(loginPass));
   wifiDown();
   st = ok ? State::Done : State::Failed;
   task = nullptr;
@@ -343,11 +383,18 @@ static void start(Job j) {
   if (task) return;
   job = j;
   cancelReq = false;
+  if (j != Job::Login) memset(loginPass, 0, sizeof(loginPass));
   // TLS needs a deep stack.
   xTaskCreatePinnedToCore(worker, "cloud", 12288, nullptr, 1, &task, 0);
 }
 
 void startLink() { start(Job::Link); }
 void startSync() { start(Job::Sync); }
+void startLogin(const char* email, const char* password) {
+  if (task) return;
+  strncpy(loginEmail, email, sizeof(loginEmail) - 1);
+  strncpy(loginPass, password, sizeof(loginPass) - 1);
+  start(Job::Login);
+}
 
 }  // namespace cloud

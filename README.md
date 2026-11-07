@@ -23,9 +23,14 @@ The Cardputer can play songs made on [trkr.one](https://trkr.one) — in its
 tracker, or by its generator — and keeps them on its flash.
 
 - **Hold `` ` `` → 5 Cloud**: set up WiFi (type the network name and password),
-  then **Link trkr.one account**. The screen shows a code like `BKDT-7Q2M`;
-  open **trkr.one/link** on a phone or computer, sign in and type it. The
-  device links itself a few seconds later.
+  then either:
+  - **Sign in with email**: type your trkr.one email and password. The device
+    keeps only a sign-in token, never the password.
+  - **…or link with a code**: the screen shows a code like `BKDT-7Q2M`. Open
+    **trkr.one/link** on a phone or computer, sign in and type the code. The
+    device links itself a few seconds later.
+
+  Either way, all songs in your account sync to the device.
 - **Sync songs now** downloads new and changed songs, removes ones you deleted
   online, and uploads songs changed on the device (tempo for now). If a song
   changed in both places, both versions are kept.
@@ -35,7 +40,7 @@ tracker, or by its generator — and keeps them on its flash.
   loaded song too.
 
 Songs play over USB/BLE MIDI on each track's channel and through the speaker
-preview. Device links can be removed on trkr.one → Account.
+preview. Signed-in devices are listed (and can be removed) on trkr.one → Account.
 
 HTTPS uses the root certificates built into ESP-IDF, so the device checks it
 is talking to the real trkr.one. Songs are read and written in the `TRKR 1`
