@@ -26,13 +26,14 @@ enum Item : uint8_t {
   IT_METRONOME,
   IT_QUANTIZE,
   IT_CLOCK,
+  IT_CONNECT,
   IT_COUNT
 };
 
 static const char* const LABELS[IT_COUNT] = {
     "Bluetooth MIDI", "USB MIDI", "Speaker",    "Speaker volume", "Velocity", "Tempo",
     "Key",            "Scale",    "Piano keys", "Metronome",      "Rec quantize",
-    "MIDI clock out",
+    "MIDI clock out", "Connect to BT device",
 };
 static constexpr int VISIBLE = 10;
 
@@ -101,6 +102,7 @@ class SetupScreen : public Screen {
       case IT_METRONOME: snprintf(out, n, "%s", METRO[settings.metronome % 3]); break;
       case IT_QUANTIZE: snprintf(out, n, "%s", settings.quantize ? "on (snap to steps)" : "off"); break;
       case IT_CLOCK: snprintf(out, n, "%s", settings.clockOut ? "ON (start/stop too)" : "off"); break;
+      case IT_CONNECT: snprintf(out, n, "%s", settings.btName[0] ? settings.btName : "open >"); break;
       case IT_ROOT: snprintf(out, n, "%s", theory::noteName(settings.root)); break;
       case IT_SCALE: snprintf(out, n, "%s", theory::scaleName(settings.scale)); break;
       case IT_PIANO_MODE:
@@ -115,6 +117,7 @@ class SetupScreen : public Screen {
       case IT_BLE:
         settings.bleMidi = !settings.bleMidi;
         midi::setBleEnabled(settings.bleMidi);
+        applyBtAuto();
         break;
       case IT_USB:
         settings.usbMidi = !settings.usbMidi;
@@ -143,6 +146,7 @@ class SetupScreen : public Screen {
       case IT_METRONOME: settings.metronome = (uint8_t)((settings.metronome + 3 + d) % 3); break;
       case IT_QUANTIZE: settings.quantize = !settings.quantize; break;
       case IT_CLOCK: settings.clockOut = !settings.clockOut; break;
+      case IT_CONNECT: goTo(connectScreen()); break;
       case IT_ROOT: settings.root = (uint8_t)((settings.root + 12 + d) % 12); break;
       case IT_SCALE:
         settings.scale = (uint8_t)((settings.scale + theory::SCALE_COUNT + d) % theory::SCALE_COUNT);

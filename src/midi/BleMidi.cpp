@@ -3,10 +3,24 @@
 #include <Arduino.h>
 #include <BLEDevice.h>
 #include <BLEServer.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+#include <freertos/task.h>
+#include <string.h>
+
+#include <algorithm>
+#include <vector>
 
 // Uses the BLE library that ships with the ESP32 Arduino core (NimBLE-based in
 // core 3.3+). An earlier build linked the separate NimBLE-Arduino library on
 // top of the core's own NimBLE stack, which is a likely cause of crashes at boot.
+//
+// Two roles at once:
+//   peripheral  the Cardputer advertises as "Cardputer MIDI" and phones / computers
+//               connect to it (they subscribe to notifications)
+//   central     the Cardputer scans for, and connects out to, a BLE MIDI device
+//               that only waits to be connected to (we write to it)
+// Every MIDI packet goes to both when both are connected.
 
 namespace blemidi {
 
@@ -22,6 +36,26 @@ static volatile uint16_t peerMtu = 23;
 static uint8_t pkt[128];
 static size_t pktLen = 0;
 
+// ── Central (outgoing connection) state ──────────────────────────────────────
+static BLEClient* client = nullptr;
+static BLERemoteCharacteristic* remoteChar = nullptr;
+static volatile bool remoteReady = false;   // connected and the MIDI characteristic found
+static SemaphoreHandle_t remoteMtx = nullptr;  // guards remoteChar between writers and reconnects
+static volatile RemoteState rstate = RemoteState::Idle;
+static char remoteNameBuf[24] = "";
+static Found connectedDev{};  // the device we're connected to (for remembering it)
+static char errorBuf[40] = "";
+
+static SemaphoreHandle_t foundMtx = nullptr;
+static std::vector<Found> found;
+static volatile bool isScanning = false;
+
+static TaskHandle_t worker = nullptr;
+static Found target;                 // device the worker should connect to
+static volatile bool connectRequested = false;
+static Found autoTarget;             // reconnected to automatically while not connected
+static volatile bool autoOn = false;
+
 class ServerCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer*) override {}
   void onDisconnect(BLEServer*) override { peerMtu = 23; }
@@ -30,10 +64,108 @@ class ServerCallbacks : public BLEServerCallbacks {
 #endif
 };
 
+class ClientCallbacks : public BLEClientCallbacks {
+  void onConnect(BLEClient*) override {}
+  void onDisconnect(BLEClient*) override {
+    remoteReady = false;  // the characteristic stays allocated until the next connect
+    if (rstate == RemoteState::Connected) rstate = RemoteState::Idle;
+  }
+};
+
+class ScanCallbacks : public BLEAdvertisedDeviceCallbacks {
+  void onResult(BLEAdvertisedDevice d) override {
+    const bool midi = d.haveServiceUUID() && d.isAdvertisingService(BLEUUID(MIDI_SERVICE_UUID));
+    if (!midi && !d.haveName()) return;  // nameless non-MIDI devices are just noise
+    Found f{};
+    strncpy(f.name, d.haveName() ? d.getName().c_str() : "(no name)", sizeof(f.name) - 1);
+    strncpy(f.addr, d.getAddress().toString().c_str(), sizeof(f.addr) - 1);
+    f.addrType = d.getAddressType();
+    f.rssi = (int8_t)d.getRSSI();
+    f.midi = midi;
+    xSemaphoreTake(foundMtx, portMAX_DELAY);
+    bool dup = false;
+    for (auto& e : found) dup |= strcmp(e.addr, f.addr) == 0;
+    if (!dup && found.size() < 24) found.push_back(f);
+    xSemaphoreGive(foundMtx);
+  }
+};
+
 static ServerCallbacks serverCallbacks;
+static ClientCallbacks clientCallbacks;
+static ScanCallbacks scanCallbacks;
+
+static void setError(const char* msg) {
+  strncpy(errorBuf, msg, sizeof(errorBuf) - 1);
+  errorBuf[sizeof(errorBuf) - 1] = 0;
+}
+
+static volatile bool userDropped = false;  // last disconnect was asked for here
+
+// Runs on the worker task: connecting blocks for up to a few seconds.
+// `quiet` = background reconnect: failures don't show up as errors.
+static void doConnect(const Found& t, bool quiet = false) {
+  const RemoteState failState = quiet ? RemoteState::Idle : RemoteState::Failed;
+  if (!quiet) rstate = RemoteState::Connecting;
+  if (isScanning) BLEDevice::getScan()->stop();
+  isScanning = false;
+
+  xSemaphoreTake(remoteMtx, portMAX_DELAY);
+  remoteReady = false;
+  remoteChar = nullptr;
+  xSemaphoreGive(remoteMtx);
+
+  if (!client) {
+    client = BLEDevice::createClient();
+    client->setClientCallbacks(&clientCallbacks);
+  }
+  if (client->isConnected()) client->disconnect();
+
+  if (!client->connect(BLEAddress(String(t.addr), t.addrType), t.addrType, 6000)) {
+    if (!quiet) setError("Couldn't connect. Is it discoverable?");
+    rstate = failState;
+    return;
+  }
+  BLERemoteService* svc = client->getService(MIDI_SERVICE_UUID);
+  BLERemoteCharacteristic* ch = svc ? svc->getCharacteristic(MIDI_CHAR_UUID) : nullptr;
+  if (!ch || !(ch->canWriteNoResponse() || ch->canWrite())) {
+    client->disconnect();
+    if (!quiet) setError("That device has no BLE MIDI input");
+    rstate = failState;
+    return;
+  }
+  // Subscribe too: some devices only accept MIDI from centrals that listen.
+  if (ch->canNotify()) ch->registerForNotify([](BLERemoteCharacteristic*, uint8_t*, size_t, bool) {});
+
+  xSemaphoreTake(remoteMtx, portMAX_DELAY);
+  remoteChar = ch;
+  strncpy(remoteNameBuf, t.name, sizeof(remoteNameBuf) - 1);
+  connectedDev = t;
+  userDropped = false;
+  remoteReady = true;
+  xSemaphoreGive(remoteMtx);
+  errorBuf[0] = 0;
+  rstate = RemoteState::Connected;
+}
+
+static void workerTask(void*) {
+  for (;;) {
+    // Wake for a connect request, or every 10 s to retry the remembered device.
+    ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(10000));
+    if (!isEnabled) continue;
+    if (connectRequested) {
+      connectRequested = false;
+      doConnect(target);
+    } else if (autoOn && !remoteReady && !isScanning && rstate != RemoteState::Connecting &&
+               autoTarget.addr[0]) {
+      doConnect(autoTarget, true);
+    }
+  }
+}
 
 void begin(const char* deviceName) {
   if (server) return;
+  remoteMtx = xSemaphoreCreateMutex();
+  foundMtx = xSemaphoreCreateMutex();
   BLEDevice::init(deviceName);
   BLEDevice::setMTU(128);
   server = BLEDevice::createServer();
@@ -54,6 +186,8 @@ void begin(const char* deviceName) {
   scanData.setName(deviceName);
   adv->setAdvertisementData(advData);
   adv->setScanResponseData(scanData);
+
+  xTaskCreatePinnedToCore(workerTask, "blecentral", 6144, nullptr, 1, &worker, 0);
 }
 
 void setEnabled(bool on) {
@@ -63,20 +197,29 @@ void setEnabled(bool on) {
   BLEAdvertising* adv = BLEDevice::getAdvertising();
   if (on) {
     if (server->getConnectedCount() == 0) adv->start();
+    if (worker) xTaskNotifyGive(worker);  // reconnect the remembered device soon
   } else {
     adv->stop();
     for (auto& peer : server->getPeerDevices(false)) server->disconnect(peer.first);
+    disconnectRemote();
     pktLen = 0;
   }
 }
 
 bool enabled() { return isEnabled; }
-bool connected() { return isEnabled && server && server->getConnectedCount() > 0; }
+static bool serverConnected() { return server && server->getConnectedCount() > 0; }
+bool connected() { return isEnabled && (serverConnected() || remoteReady); }
 
 void flush() {
-  if (pktLen > 1 && connected()) {
-    midiChar->setValue(pkt, pktLen);
-    midiChar->notify();
+  if (pktLen > 1 && isEnabled) {
+    if (serverConnected()) {
+      midiChar->setValue(pkt, pktLen);
+      midiChar->notify();
+    }
+    if (remoteReady && xSemaphoreTake(remoteMtx, 0) == pdTRUE) {  // never wait on a reconnect
+      if (remoteReady && remoteChar) remoteChar->writeValue(pkt, pktLen, false);
+      xSemaphoreGive(remoteMtx);
+    }
   }
   pktLen = 0;
 }
@@ -84,6 +227,7 @@ void flush() {
 static void sendBytes(const uint8_t* msg, uint8_t n) {
   if (!connected()) return;
   size_t maxPayload = peerMtu > 3 ? peerMtu - 3 : 20;
+  if (remoteReady) maxPayload = 20;  // safe for any device we connected out to
   if (maxPayload > sizeof(pkt)) maxPayload = sizeof(pkt);
   if (pktLen + 1 + n > maxPayload) flush();
   uint16_t ts = (uint16_t)(millis() & 0x1FFF);
@@ -103,5 +247,77 @@ void send(uint8_t status, uint8_t d1, uint8_t d2) {
   uint8_t m[3] = {status, d1, d2};
   sendBytes(m, 3);
 }
+
+// ── Central API ──────────────────────────────────────────────────────────────
+static void scanDone(BLEScanResults) { isScanning = false; }
+
+void startScan(uint8_t seconds) {
+  if (!server || !isEnabled || isScanning || rstate == RemoteState::Connecting) return;
+  xSemaphoreTake(foundMtx, portMAX_DELAY);
+  found.clear();
+  xSemaphoreGive(foundMtx);
+  BLEScan* s = BLEDevice::getScan();
+  s->setAdvertisedDeviceCallbacks(&scanCallbacks, false);
+  s->setActiveScan(true);  // ask for scan responses: that's where most names are
+  s->setInterval(100);
+  s->setWindow(90);
+  s->clearResults();
+  isScanning = true;
+  if (!s->start(seconds, scanDone, false)) isScanning = false;
+}
+
+bool scanning() { return isScanning; }
+
+uint8_t scanResults(Found* out, uint8_t max) {
+  if (!foundMtx) return 0;
+  xSemaphoreTake(foundMtx, portMAX_DELAY);
+  // MIDI devices first, then by signal strength.
+  std::vector<Found> sorted = found;
+  xSemaphoreGive(foundMtx);
+  std::sort(sorted.begin(), sorted.end(), [](const Found& a, const Found& b) {
+    return a.midi != b.midi ? a.midi : a.rssi > b.rssi;
+  });
+  uint8_t n = 0;
+  for (auto& f : sorted)
+    if (n < max) out[n++] = f;
+  return n;
+}
+
+void connectTo(const Found& f) {
+  if (!worker || !isEnabled) return;
+  target = f;
+  connectRequested = true;
+  rstate = RemoteState::Connecting;
+  xTaskNotifyGive(worker);
+}
+
+void disconnectRemote() {
+  autoOn = false;
+  userDropped = true;
+  if (remoteMtx) {
+    xSemaphoreTake(remoteMtx, portMAX_DELAY);
+    remoteReady = false;
+    xSemaphoreGive(remoteMtx);
+  }
+  if (client && client->isConnected()) client->disconnect();
+  rstate = RemoteState::Idle;
+}
+
+void setAutoReconnect(const Found* f) {
+  if (f && f->addr[0]) {
+    autoTarget = *f;
+    autoOn = true;
+    if (worker) xTaskNotifyGive(worker);
+  } else {
+    autoOn = false;
+  }
+}
+
+RemoteState remoteState() { return rstate; }
+bool remoteConnected() { return remoteReady; }
+const char* remoteName() { return remoteNameBuf; }
+Found connectedDevice() { return connectedDev; }
+bool droppedByUser() { return userDropped; }
+const char* lastError() { return errorBuf; }
 
 }  // namespace blemidi

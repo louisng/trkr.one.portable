@@ -58,13 +58,16 @@ Screen* scenesScreen();
 Screen* arrangeScreen();
 Screen* synthScreen();
 Screen* drumMidiScreen();
+Screen* connectScreen();
 void songsStartSaveAs();  // call before switching to songsScreen()
 Screen* setupScreen();
 Screen* keyTestScreen();
 
 // Shared helpers (App.cpp)
 void toast(const char* msg);
-void goTo(Screen* s);  // switch screens from inside a screen / panel
+void goTo(Screen* s);
+// Start / stop reconnecting to the remembered Bluetooth device per settings.
+void applyBtAuto();  // switch screens from inside a screen / panel
 void markDirty();
 bool isAdv();
 
