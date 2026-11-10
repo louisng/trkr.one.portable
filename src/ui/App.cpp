@@ -34,7 +34,7 @@ static midi::LinkState lastBle, lastUsb;
 static bool adv = false;
 
 // Menu shortcut keys, looked up by key cap so they follow the layout table.
-static int8_t idxDigit[5];
+static int8_t idxDigit[6];
 static int8_t idxB = -1, idxU = -1, idxM = -1;
 
 static int8_t findCap(const char* cap) {
@@ -86,6 +86,7 @@ static void handleMenuKey(uint8_t idx) {
   else if (idx == idxDigit[2]) switchTo(keyTestScreen());
   else if (idx == idxDigit[3]) switchTo(songsScreen());
   else if (idx == idxDigit[4]) switchTo(cloudScreen());
+  else if (idx == idxDigit[5]) switchTo(genScreen());
   else if (idx == idxB) toggleBle();
   else if (idx == idxU) toggleUsb();
   else if (idx == idxM) toggleSpeaker();
@@ -118,6 +119,7 @@ static void handleEvent(const keys::Event& e) {
     swallowed &= ~bit;
     return;
   }
+  if (current->consumeKey(e.index, e.pressed)) return;
   if (current->musicKeys() && player::onKey(e.index, e.pressed)) return;
   if (e.pressed && def.role == layout::Role::Action) current->onAction(def.value);
 }
@@ -167,8 +169,8 @@ static void drawMenu() {
   canvas.setTextColor(col::TEXT);
   canvas.drawString("1 Live   2 Setup   3 Key test", x + 8, y + 24);
   canvas.drawString("4 Songs  5 Cloud (trkr.one)", x + 8, y + 36);
-  canvas.setTextColor(col::DIM);
-  canvas.drawString("Songs play over MIDI + speaker", x + 8, y + 52);
+  canvas.setTextColor(col::ACCENT);
+  canvas.drawString("6 Generate  (endless songs)", x + 8, y + 52);
 
   char buf[32];
   canvas.setTextColor(col::TEXT);
@@ -211,6 +213,7 @@ void begin() {
   idxDigit[2] = findCap("3");
   idxDigit[3] = findCap("4");
   idxDigit[4] = findCap("5");
+  idxDigit[5] = findCap("6");
   idxB = findCap("b");
   idxU = findCap("u");
   idxM = findCap("m");
@@ -235,6 +238,7 @@ void tick() {
     lastUsb = u;
     dirty = true;
   }
+  current->tick();
   // Menu overlay appears after a short delay; toast disappears on its own.
   if (menuVisible() != menuDrawn) dirty = true;
   if (toastUntil && now >= toastUntil) {

@@ -26,6 +26,7 @@ struct Track {
   uint8_t ch = 1;      // MIDI channel 1-16
   uint8_t vol = 80;    // 0-100
   bool mute = false;
+  uint8_t strum = 0;   // spread chord notes over this many 1/24 steps
 };
 
 // One note (or chord) in a pattern.

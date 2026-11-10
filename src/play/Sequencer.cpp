@@ -16,6 +16,13 @@ static uint16_t slot = 0;          // order index of absStep
 static uint16_t inSlot = 0;        // step within that pattern
 static uint32_t nextAt = 0;        // micros() of the next step
 static uint32_t stepUs = 150000;
+static bool looping = true;
+static bool ending = false;        // last step scheduled; waiting for it to sound out
+static bool finishedFlag = false;
+static PatternSource* source = nullptr;   // stream mode: patterns come from here
+static song::Pattern streamPat;           // the pattern being played in stream mode
+static bool patNeeded = false;            // stream: the current pattern is used up
+static uint32_t streamBase = 0;           // absolute step at which the current song began
 
 // Pending note-ons and note-offs, in no particular order.
 struct Pending {
@@ -24,7 +31,7 @@ struct Pending {
   uint8_t kind;  // 0 = off, 1 = on, 2 = drum hit (speaker one-shot)
   bool active;
 };
-static constexpr uint8_t QUEUE = 128;
+static constexpr uint8_t QUEUE = 192;
 static Pending queue[QUEUE];
 
 // GM drum note → speaker drum pad (matches the Cardputer's 12 pads).
@@ -79,8 +86,9 @@ void setLoaded(bool on) {
 }
 bool playing() { return running; }
 uint32_t position() { return playingStep; }
+uint32_t songPosition() { return source ? playingStep - streamBase : playingStep; }
 uint16_t orderIndex() { return slot; }
-uint16_t bar() { return playingStep / 16 + 1; }
+uint16_t bar() { return songPosition() / 16 + 1; }
 
 static void computeTempo() { stepUs = 60000000UL / (songData.bpm ? songData.bpm : 100) / 4; }
 void changed() { computeTempo(); }
@@ -103,9 +111,47 @@ static void seek(uint32_t step) {
   absStep = 0;
 }
 
+void playStream(PatternSource* src) {
+  stop();
+  source = src;
+  isLoaded = true;
+  patNeeded = true;
+  absStep = 0;
+  playingStep = 0;
+  streamBase = 0;
+  inSlot = 0;
+  ending = false;
+  finishedFlag = false;
+  nextAt = micros() + 2000;
+  running = true;
+}
+
+void adopt(song::Song&& s) {
+  stop();
+  songData = std::move(s);
+  isLoaded = true;
+  finishedFlag = false;
+  computeTempo();
+}
+void setLoop(bool loop) { looping = loop; }
+bool finished() { return finishedFlag; }
+
+void silenceTrack(uint8_t t) {
+  if (t >= songData.trackCount) return;
+  const song::Track& tr = songData.tracks[t];
+  if (tr.type == song::TrackType::Drum) return;  // drum hits are one-shots
+  for (auto& p : queue)
+    if (p.active && p.ch == tr.ch) {
+      if (p.kind == 0) fire(p);
+      p.active = false;
+    }
+}
+
 void play(uint32_t fromStep) {
   if (!isLoaded) return;
   stop();
+  ending = false;
+  finishedFlag = false;
   computeTempo();
   seek(fromStep);
   nextAt = micros() + 2000;
@@ -113,6 +159,7 @@ void play(uint32_t fromStep) {
 }
 
 void stop() {
+  source = nullptr;
   if (!running) return;
   running = false;
   for (auto& p : queue)
@@ -125,7 +172,7 @@ void stop() {
 }
 
 static void scheduleStep(uint32_t t0) {
-  const song::Pattern& pat = songData.patterns[songData.order[slot]];
+  const song::Pattern& pat = source ? streamPat : songData.patterns[songData.order[slot]];
   bool odd = inSlot & 1;
   uint32_t swingUs = odd ? (uint32_t)songData.swing * stepUs / 100 : 0;
   for (const auto& e : pat.events) {
@@ -138,21 +185,34 @@ static void scheduleStep(uint32_t t0) {
     uint32_t dur = (uint32_t)e.len24 * stepUs / 24;
     if (dur < 5000) dur = 5000;
     bool drum = t.type == song::TrackType::Drum;
+    uint32_t strumUs = (uint32_t)t.strum * stepUs / 24;  // chord notes arrive one after another
     for (uint8_t k = 0; k < e.count; k++) {
-      push(on, t.ch, e.notes[k], e.vel, drum ? 2 : 1);
-      push(on + dur - 1000, t.ch, e.notes[k], 0, 0);
+      uint32_t at = on + k * strumUs;
+      push(at, t.ch, e.notes[k], e.vel, drum ? 2 : 1);
+      push(at + dur - 1000, t.ch, e.notes[k], 0, 0);
     }
   }
   playingStep = absStep;
   // advance
   absStep++;
   inSlot++;
+  if (source) {
+    if (inSlot >= pat.len) {
+      inSlot = 0;
+      patNeeded = true;  // update() fetches the next pattern before the next step
+    }
+    return;
+  }
   if (inSlot >= pat.len) {
     inSlot = 0;
     slot++;
-    if (slot >= songData.order.size()) {  // loop the song
-      slot = 0;
-      absStep = 0;
+    if (slot >= songData.order.size()) {
+      if (looping) {  // loop the song
+        slot = 0;
+        absStep = 0;
+      } else {
+        ending = true;  // let the last notes sound out, then report finished()
+      }
     }
   }
 }
@@ -161,9 +221,32 @@ void update() {
   if (running) {
     uint32_t now = micros();
     // Schedule a little ahead so a slow screen redraw doesn't delay the beat.
-    while ((int32_t)(now + 4000 - nextAt) >= 0) {
+    while (!ending && (int32_t)(now + 4000 - nextAt) >= 0) {
+      if (source && patNeeded) {
+        if (source->ready()) {
+          bool newSong = false;
+          source->take(streamPat, newSong);
+          if (newSong) {
+            streamBase = absStep;
+            computeTempo();
+          }
+          patNeeded = false;
+          inSlot = 0;
+        } else if (source->finished()) {
+          ending = true;
+          break;
+        } else {
+          nextAt = now;  // the next pattern isn't built yet: wait, don't run ahead
+          break;
+        }
+      }
       scheduleStep(nextAt);
       nextAt += stepUs;
+    }
+    if (ending && (int32_t)(now - nextAt) >= 0) {
+      running = false;
+      ending = false;
+      finishedFlag = true;
     }
   }
   uint32_t now = micros();

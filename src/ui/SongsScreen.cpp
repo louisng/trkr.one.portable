@@ -9,6 +9,7 @@
 
 #include "../input/KeyLayout.h"
 #include "../net/Cloud.h"
+#include "../play/GenMode.h"
 #include "../play/Sequencer.h"
 #include "../song/SongStore.h"
 #include "Screen.h"
@@ -19,7 +20,14 @@ class SongsScreen : public Screen {
  public:
   const char* title() const override { return "SONGS"; }
 
-  void onEnter() override { refresh(); }
+  void onEnter() override {
+    if (genmode::running()) {  // the sequencer is shared: Generated mode lets go of it
+      genmode::stop();
+      loadedFile = "";
+    }
+    seq::setLoop(true);
+    refresh();
+  }
   void onLeave() override { saveIfEdited(); }
 
   void onAction(uint8_t a) override {

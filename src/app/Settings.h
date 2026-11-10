@@ -15,6 +15,10 @@ struct Settings {
   uint8_t scale = 0;       // theory::SCALE index
   bool pianoScaleMode = false;  // false: chromatic piano; true: white keys = scale degrees
   int8_t octave = 4;       // piano octave (C4 = 60); chords play one octave lower
+  // Generated mode
+  uint8_t genGenre = 0;    // selected genre (index into gen::GENRE_LIST)
+  uint8_t genAlong = 1;    // play-along mode: 0 free, 1 chord tones, 2 snap to chord, 3 scale
+  uint16_t genMuted = 0;   // bit n = generated track n is muted (kept between songs)
 };
 
 extern Settings settings;

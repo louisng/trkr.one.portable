@@ -38,12 +38,22 @@ class Screen {
   virtual void onAction(uint8_t action) {}
   // Every raw key event, before anything else handles it.
   virtual void onRawKey(uint8_t index, bool pressed) {}
+  // Return true to take a key for yourself (it then doesn't play a note).
+  // Called for presses and releases; take both halves of a key you took.
+  virtual bool consumeKey(uint8_t index, bool pressed) { return false; }
+  // Called every loop, to ask for a redraw when something on screen changed.
+  virtual void tick() {}
   virtual void draw(M5Canvas& c) = 0;
 };
 
 Screen* liveScreen();
 Screen* setupScreen();
 Screen* keyTestScreen();
+Screen* genScreen();
+
+// The 4 x 14 key map (LiveScreen.cpp). `filtered` greys out piano keys that
+// the play-along filter would silence.
+void drawKeyMap(M5Canvas& c, int top, bool showCaps, bool filtered = false);
 Screen* songsScreen();
 Screen* cloudScreen();
 

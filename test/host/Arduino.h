@@ -24,3 +24,7 @@ class Stream : public Print {
   std::string in; size_t pos = 0;
   int read() { return pos < in.size() ? (unsigned char)in[pos++] : -1; }
 };
+
+// virtual clock for the sequencer test
+extern uint32_t g_micros;
+inline uint32_t micros() { return g_micros; }

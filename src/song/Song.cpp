@@ -115,6 +115,10 @@ bool Parser::line(const char* text) {
     v1 = strtol(end, &end, 10);
     t.vol = (uint8_t)constrain(v1, 0, 100);
     copyTrim(t.name, sizeof(t.name), end);
+  } else if (cmdIs(text, "strum")) {
+    v1 = strtol(args, &end, 10);
+    v2 = strtol(end, nullptr, 10);
+    if (v1 >= 0 && v1 < s_.trackCount) s_.tracks[v1].strum = (uint8_t)constrain(v2, 0, 12);
   } else if (cmdIs(text, "pattern")) {
     if (s_.patterns.size() >= MAX_PATTERNS) {
       err_ = "too many patterns";
@@ -219,6 +223,8 @@ void save(Print& out, const Song& s) {
     out.printf("track %u %s %s %u %u %s\n", t.ch, typeName(t.type), t.voice[0] ? t.voice : "-",
                t.mute ? 1 : 0, t.vol, t.name[0] ? t.name : "-");
   }
+  for (uint8_t i = 0; i < s.trackCount; i++)
+    if (s.tracks[i].strum) out.printf("strum %u %u\n", i, s.tracks[i].strum);
   for (const auto& p : s.patterns) {
     out.printf("pattern %u %s\n", p.len, p.name[0] ? p.name : "-");
     for (const auto& e : p.events) {

@@ -26,6 +26,8 @@ static Held held[layout::KEY_COUNT];
 static uint8_t refs[16][128];
 static uint8_t inv = 0;
 static char last[16] = "";
+static NoteFilter noteFilter = nullptr;
+void setNoteFilter(NoteFilter f) { noteFilter = f; }
 
 // General MIDI drum notes for the 12 pads.
 static const uint8_t DRUM_NOTES[12] = {36, 38, 37, 39, 42, 46, 41, 45, 48, 49, 51, 56};
@@ -90,6 +92,7 @@ static void press(uint8_t k, const layout::KeyDef& def) {
   switch (def.role) {
     case Role::Piano: {
       int n = pianoNoteFor(def.value);
+      if (n >= 0 && noteFilter) n = noteFilter(n);
       if (n < 0) return;
       h = {settings.pianoCh, 1, {(uint8_t)n}};
       startNote(h.channel, (uint8_t)n, false, 0);

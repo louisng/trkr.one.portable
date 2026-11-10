@@ -9,7 +9,6 @@
 
 namespace ui {
 
-void drawKeyMap(M5Canvas& c, int top, bool showCaps);
 
 class KeyTestScreen : public Screen {
  public:

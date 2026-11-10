@@ -6,6 +6,7 @@
 #include "audio/Monitor.h"
 #include "input/KeyInput.h"
 #include "midi/MidiOut.h"
+#include "play/GenMode.h"
 #include "net/Cloud.h"
 #include "play/Sequencer.h"
 #include "song/SongStore.h"
@@ -30,11 +31,13 @@ void setup() {
   store::begin();
   cloud::begin();
   seq::begin();
+  genmode::begin();
   ui::begin();
 }
 
 void loop() {
   M5Cardputer.update();  // scans the keyboard
+  genmode::tick();       // builds / starts generated songs
   seq::update();         // song playback (before and after the redraw)
   ui::tick();            // key events -> notes / screens, redraw when needed
   seq::update();

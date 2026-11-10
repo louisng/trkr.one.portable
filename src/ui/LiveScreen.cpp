@@ -6,6 +6,7 @@
 #include "../input/KeyLayout.h"
 #include "../music/Theory.h"
 #include "../play/LivePlayer.h"
+#include "../play/GenMode.h"
 #include "../play/Sequencer.h"
 #include "Screen.h"
 
@@ -15,7 +16,7 @@ using layout::Role;
 
 // Draw the 4 x 14 key map with each key's current function. Shared with the
 // key-test screen (which shows key caps instead of functions).
-void drawKeyMap(M5Canvas& c, int top, bool showCaps) {
+void drawKeyMap(M5Canvas& c, int top, bool showCaps, bool filtered) {
   const int cw = 17, ch = 15, x0 = (W - cw * layout::COLS) / 2;
   c.setFont(&fonts::TomThumb);
   c.setTextDatum(middle_center);
@@ -45,6 +46,10 @@ void drawKeyMap(M5Canvas& c, int top, bool showCaps) {
           int n = player::pianoNoteFor(def.value);
           if (n >= 0) snprintf(label, sizeof(label), "%s", theory::noteName(n % 12));
           else bg = col::FAINT;
+          if (filtered && n >= 0 && genmode::noteBlocked(n)) {
+            bg = col::FAINT;
+            fg = col::DIM;
+          }
           break;
         }
         case Role::Action:
@@ -88,7 +93,8 @@ class LiveScreen : public Screen {
         break;
       case layout::ACT_PLAY:
         // Play / stop the song loaded on the Songs screen, to jam along.
-        if (!seq::loaded()) toast("Load a song first (hold ` > 4)");
+        if (genmode::running()) genmode::toggle();
+        else if (!seq::loaded()) toast("Load a song first (hold ` > 4)");
         else if (seq::playing()) seq::stop();
         else seq::play(0);
         break;

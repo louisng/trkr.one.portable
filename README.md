@@ -17,6 +17,48 @@ USB MIDI sequencer for the Arduboy.
 - Settings saved to flash
 - Songs from trkr.one: sync over WiFi, play over MIDI and the speaker (see below)
 
+## Generated mode (hold `` ` `` → 6)
+
+The same song generator as trkr.one, running on the Cardputer: pick a genre
+and it plays endless songs over USB/Bluetooth MIDI and the speaker, with no
+computer or network. All 17 genres on the website are in the firmware. A seed
+makes **exactly** the same song on the device and on the website (checked
+note for note by `test/host/run_gen.sh`).
+
+| Key | Function |
+|---|---|
+| `space` | play / stop |
+| `enter` | skip to a new song now |
+| `;` `.` | previous / next genre (used from the next song that is built) |
+| `,` `/` | tempo − / + for this song |
+| `f` | **play-along mode**, cycles FREE → CHORD → SNAP → SCALE |
+| `l` | keep repeating the most recent song |
+| `fn` + `1`…`8` | **mute / unmute a part**: kick, snare, hats, perc, bass, keys, lead, pad/arp |
+| `fn` + `9` | unmute everything |
+
+Everything else works as on the Live screen: piano, chord buttons (in the
+song's key) and drum pads, `a`/`k` octave, `tab` inversion, and the 7th/9th/
+major-minor/sus4 modifiers. Mutes are kept between songs and stop the notes of
+that part immediately, so you can silence whatever a connected synth already
+plays.
+
+**Play-along** limits what the piano keys do while a song plays, following the
+current chord:
+- **FREE**: every key sounds.
+- **CHORD**: only the chord's notes sound; other keys stay silent (they are greyed on the key map).
+- **SNAP**: a key outside the chord plays the nearest chord note instead.
+- **SCALE**: only notes that fit the chord's scale sound.
+
+Parts go out on fixed MIDI channels, the same as the website: lead 1, keys 2,
+bass 3, pad/arp 4, drums 10. The live piano/chord/drum channels are set in
+Setup.
+
+Songs are streamed: a background task builds them one 4-bar pattern at a time,
+so only the playing pattern and a few waiting ones are in memory (the
+generator needs about 36 KB at most). The next song starts building before the
+current one ends, so there's no gap. If free memory is too low to start, the
+screen says so (it shows the free memory while stopped).
+
 ## Songs and trkr.one sync
 
 The Cardputer can play songs made on [trkr.one](https://trkr.one) — in its
@@ -103,6 +145,16 @@ The device advertises as **Cardputer MIDI**.
 - **Android:** use a BLE MIDI app (e.g. "MIDI BLE Connect") or a DAW that supports BLE MIDI.
 - **Windows:** Bluetooth MIDI support depends on the app; MIDIberry or loopMIDI + a BLE bridge work.
 
+## Tests (on a PC, no hardware)
+
+```sh
+test/host/run_gen.sh /path/to/trkr     # firmware generator == website generator, every genre, many seeds
+test/host/run_seq.sh                   # streamed playback == finished-song playback; late patterns lose nothing
+test/host/run.sh song.trk              # TRKR file parser round trip
+```
+To update the genre tables after changing genres on the website, run in the
+trkr repo: `node scripts/export-cpp-genres.mjs <this repo>/src/gen/GenreData.cpp`.
+
 ## Roadmap
 
 1. **Foundation** ✅: hardware layer, key layout, BLE + USB MIDI, live play, key test
@@ -127,7 +179,10 @@ src/
   midi/MidiOut        sends to every enabled transport
   midi/BleMidi        BLE MIDI peripheral (NimBLE)
   audio/Monitor       speaker preview
-  play/Sequencer      plays a song: arrangement, micro-timing, swing, lengths
+  play/Sequencer      plays a song, or a stream of patterns: micro-timing, swing, lengths
+  play/GenMode        Generated mode: generator task, pattern queue, mutes, play-along
+  gen/                the song generator (port of trkr's generator.js): Generator, GenTheory,
+                      Rng, Along, GenreData (generated from trkr's genres.js)
   song/Song           song model + TRKR 1 line-format parser/writer
   song/SongStore      songs on flash (LittleFS) + sync bookkeeping
   net/Cloud           WiFi, account linking (device code), two-way sync
