@@ -38,6 +38,9 @@ static void apply(const Cmd& c) {
 static void audioTask(void*) {
   int cur = 0, idle = 0;
   for (;;) {
+    // Always give other tasks a turn: if the speaker ever stops taking data this
+    // loop must not spin, or the watchdog resets the whole device.
+    vTaskDelay(1);
     Cmd c;
     bool silent = core->activeVoices() == 0 && core->activeDrums() == 0;
     // Nothing sounding for a while: sleep until the next command arrives.
@@ -60,13 +63,22 @@ static void audioTask(void*) {
     }
     core->render(bufs[cur], BLOCK);
     idle = (core->activeVoices() == 0 && core->activeDrums() == 0) ? idle + 1 : 0;
-    while (M5Cardputer.Speaker.isPlaying(SPEAKER_CHANNEL) >= 2) vTaskDelay(1);
-    M5Cardputer.Speaker.playRaw(bufs[cur], BLOCK, SAMPLE_RATE, false, 1, SPEAKER_CHANNEL, false);
-    cur = (cur + 1) % 3;
+    int waited = 0;
+    while (M5Cardputer.Speaker.isPlaying(SPEAKER_CHANNEL) >= 2) {
+      vTaskDelay(1);
+      if (++waited > 50) break;   // the speaker has stalled: carry on rather than hang
+    }
+    if (M5Cardputer.Speaker.playRaw(bufs[cur], BLOCK, SAMPLE_RATE, false, 1, SPEAKER_CHANNEL, false)) cur = (cur + 1) % 3;
+    else vTaskDelay(pdMS_TO_TICKS(10));   // refused (not ready): try again shortly
   }
 }
 
 void begin() {
+#ifdef CMC_NO_AUDIO
+  return;   // diagnostic build: no speaker at all
+#endif
+  // No working speaker (it failed to start on this board): stay silent instead of streaming into nothing.
+  if (!M5Cardputer.Speaker.isEnabled() || !M5Cardputer.Speaker.isRunning()) return;
   core = new synth::Core((float)SAMPLE_RATE);
   queue = xQueueCreate(96, sizeof(Cmd));
   // Above the generator and network tasks (priority 1), pinned away from the main loop.

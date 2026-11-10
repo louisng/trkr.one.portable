@@ -28,10 +28,14 @@ void setup() {
   midi::begin(settings.bleMidi, settings.usbMidi);
   keys::begin();
   player::begin();
+#ifndef CMC_MINIMAL
   store::begin();
   cloud::begin();
+#endif
   seq::begin();
+#ifndef CMC_MINIMAL
   genmode::begin();
+#endif
   ui::begin();
 }
 
