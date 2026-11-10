@@ -90,7 +90,7 @@ computer. `test/host/run_synth.sh <dir>` renders every genre to a WAV file
 The Cardputer can play songs made on [trkr.one](https://trkr.one) — in its
 tracker, or by its generator — and keeps them on its flash.
 
-- **Hold `` ` `` → 5 Cloud**: set up WiFi (type the network name and password),
+- **Hold `` ` `` → 5 Cloud**: set up WiFi: the first item scans and lists the networks nearby (signal bars, `*` = needs a password); pick one with `;` `.` and `enter`, then type its password. `space` rescans, and "Other network..." lets you type a hidden network's name.
   then either:
   - **Sign in with email**: type your trkr.one email and password. The device
     keeps only a sign-in token, never the password.

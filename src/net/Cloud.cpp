@@ -75,6 +75,63 @@ uint32_t lastSyncMs() { return syncedAt; }
 uint16_t lastDownloaded() { return nDown; }
 uint16_t lastUploaded() { return nUp; }
 
+// ── scanning ─────────────────────────────────────────────────────────────────
+static std::vector<Net> nets;
+static bool scanActive = false, scanBad = false, radioForScan = false;
+static uint32_t scanStarted = 0;
+
+void startScan() {
+  if (task || scanActive) return;  // the radio is busy with a sync / link
+  nets.clear();
+  scanBad = false;
+  radioForScan = true;
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect();
+  WiFi.scanDelete();
+  if (WiFi.scanNetworks(true /*async*/, false /*skip hidden*/) == WIFI_SCAN_FAILED) {
+    scanBad = true;
+    return;
+  }
+  scanActive = true;
+  scanStarted = millis();
+}
+
+bool scanning() {
+  if (!scanActive) return false;
+  int n = WiFi.scanComplete();
+  if (n == WIFI_SCAN_RUNNING) {
+    if (millis() - scanStarted > 15000) {  // gave up waiting
+      scanActive = false;
+      scanBad = true;
+    }
+    return scanActive;
+  }
+  scanActive = false;
+  if (n < 0) {
+    scanBad = true;
+    return false;
+  }
+  for (int i = 0; i < n; i++) addNet(nets, WiFi.SSID(i).c_str(), WiFi.RSSI(i), WiFi.encryptionType(i) == WIFI_AUTH_OPEN);
+  sortNets(nets);
+  WiFi.scanDelete();
+  return false;
+}
+
+bool scanFailed() { return scanBad; }
+int scanCount() { return (int)nets.size(); }
+const Net& scanNet(int i) { return nets[i]; }
+
+void endScan() {
+  if (!radioForScan) return;   // we never turned the radio on: leave WiFi alone
+  radioForScan = false;
+  scanActive = false;
+  WiFi.scanDelete();
+  if (!task) {  // don't pull the radio from under a running sync
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+  }
+}
+
 void setWifi(const char* s, const char* pw) {
   strncpy(cfgSsid, s, sizeof(cfgSsid) - 1);
   strncpy(cfgPass, pw, sizeof(cfgPass) - 1);

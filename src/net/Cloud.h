@@ -6,6 +6,8 @@
 // Network work runs on a background task; the UI polls state().
 #include <stdint.h>
 
+#include "ScanList.h"
+
 namespace cloud {
 
 enum class State : uint8_t {
@@ -26,6 +28,14 @@ const char* linkUrl();        // while Linking: where to type it
 bool hasWifi();               // credentials saved
 const char* ssid();
 void setWifi(const char* ssid, const char* pass);
+
+// Scan for networks (runs in the background; poll scanning()).
+void startScan();
+bool scanning();              // true while the scan runs; false once results are ready
+bool scanFailed();            // the last scan could not run
+int scanCount();
+const Net& scanNet(int i);    // strongest first, one per name, hidden networks left out
+void endScan();               // turn the radio back off
 bool linked();
 const char* email();
 const char* host();

@@ -1,6 +1,7 @@
 // Cloud: WiFi, signing in to trkr.one (email + password, or a link code),
 // and song sync.
 //   ; .  move     enter  choose
+// WiFi: choose a network from a scan list (or type a hidden one's name).
 // WiFi setup asks for the network name and password with the keyboard
 // (shift for capitals and symbols, del to erase, enter to confirm).
 #include <stdio.h>
@@ -31,9 +32,18 @@ class CloudScreen : public Screen {
   bool musicKeys() const override { return false; }
 
   void onEnter() override { mode = Mode::Menu; }
+  void onLeave() override { cloud::endScan(); }
+
+  // Polls the scan so the list appears by itself.
+  void tick() override {
+    if (mode != Mode::Scan) return;
+    bool now = cloud::scanning();
+    if (now || scanWas) markDirty();
+    scanWas = now;
+  }
 
   void onRawKey(uint8_t idx, bool pressed) override {
-    if (mode == Mode::Menu || !pressed) return;
+    if (mode == Mode::Menu || mode == Mode::Scan || !pressed) return;
     const char* cap = layout::keyCapLabel(idx / layout::COLS, idx % layout::COLS);
     if (strcmp(cap, "del") == 0) {
       size_t n = strlen(field);
@@ -49,6 +59,11 @@ class CloudScreen : public Screen {
   }
 
   void onAction(uint8_t a) override {
+    if (mode == Mode::Scan) {
+      scanAction(a);
+      markDirty();
+      return;
+    }
     if (mode != Mode::Menu) return;  // typed characters are handled in onRawKey
     if (a == layout::ACT_UP && sel > 0) sel--;
     if (a == layout::ACT_DOWN && sel < ITEMS - 1) sel++;
@@ -60,6 +75,10 @@ class CloudScreen : public Screen {
     if (cloud::busy()) markDirty();  // keep the status fresh
     c.setFont(&fonts::Font0);
     c.setTextDatum(top_left);
+    if (mode == Mode::Scan) {
+      drawScan(c);
+      return;
+    }
     if (mode != Mode::Menu) {
       c.setTextColor(col::ACCENT);
       c.drawString(mode == Mode::Ssid ? "WiFi network name:" : mode == Mode::Pass ? "WiFi password:"
@@ -128,13 +147,107 @@ class CloudScreen : public Screen {
   }
 
  private:
-  enum class Mode : uint8_t { Menu, Ssid, Pass, Email, LoginPass };
+  enum class Mode : uint8_t { Menu, Ssid, Pass, Email, LoginPass, Scan };
   static constexpr int ITEMS = 5;
   Mode mode = Mode::Menu;
   int sel = 0;
   char field[65] = "";
   char newSsid[33] = "";
   char newEmail[64] = "";
+  int scanSel = 0;
+  bool scanWas = false;
+
+  // ── WiFi network list ──
+  // Rows: every network found, then "Other network..." for one that is hidden.
+  int scanRows() const { return cloud::scanCount() + 1; }
+
+  void scanAction(uint8_t a) {
+    switch (a) {
+      case layout::ACT_UP: if (scanSel > 0) scanSel--; break;
+      case layout::ACT_DOWN: if (scanSel + 1 < scanRows()) scanSel++; break;
+      case layout::ACT_PLAY:  // space: look again
+        cloud::startScan();
+        scanSel = 0;
+        scanWas = true;
+        break;
+      case layout::ACT_DELETE:  // back
+        cloud::endScan();
+        mode = Mode::Menu;
+        break;
+      case layout::ACT_ENTER: {
+        if (cloud::scanning()) break;
+        if (scanSel >= cloud::scanCount()) {  // type a name
+          cloud::endScan();
+          mode = Mode::Ssid;
+          strncpy(field, cloud::ssid(), sizeof(field) - 1);
+          break;
+        }
+        const cloud::Net& n = cloud::scanNet(scanSel);
+        strncpy(newSsid, n.ssid, sizeof(newSsid) - 1);
+        newSsid[sizeof(newSsid) - 1] = 0;
+        cloud::endScan();
+        if (n.open) {
+          cloud::setWifi(newSsid, "");
+          mode = Mode::Menu;
+          toast("WiFi saved (open network)");
+        } else {
+          field[0] = 0;
+          mode = Mode::Pass;  // now the password
+        }
+        break;
+      }
+      default: break;
+    }
+  }
+
+  void drawScan(M5Canvas& c) {
+    c.setTextColor(col::ACCENT);
+    c.drawString("WiFi networks", 6, 17);
+    bool busy = cloud::scanning();
+    c.setTextDatum(top_right);
+    c.setTextColor(col::DIM);
+    c.drawString(busy ? "scanning..." : cloud::scanFailed() ? "scan failed" : "", W - 6, 17);
+    c.setTextDatum(top_left);
+    if (!busy && cloud::scanCount() == 0 && !cloud::scanFailed()) {
+      c.setTextColor(col::DIM);
+      c.drawString("none found", 6, 32);
+    }
+    const int rowH = 11, top = 30, rows = 7;
+    int total = scanRows();
+    if (scanSel >= total) scanSel = total - 1;
+    int first = scanSel - rows + 1;
+    if (first < 0) first = 0;
+    for (int i = 0; i < rows && first + i < total; i++) {
+      int idx = first + i;
+      int y = top + i * rowH;
+      bool isSel = idx == scanSel;
+      if (isSel) c.fillRect(0, y - 1, W, rowH, col::SELECT);
+      if (idx >= cloud::scanCount()) {
+        c.setTextColor(isSel ? col::TEXT : col::DIM);
+        c.drawString("Other network... (type its name)", 6, y);
+        continue;
+      }
+      const cloud::Net& n = cloud::scanNet(idx);
+      bool saved = cloud::hasWifi() && strcmp(cloud::ssid(), n.ssid) == 0;
+      c.setTextColor(isSel ? col::TEXT : col::DIM);
+      char label[30];
+      snprintf(label, sizeof(label), "%s%.26s", saved ? "> " : "", n.ssid);
+      c.drawString(label, 6, y);
+      int bars = cloud::signalBars(n.rssi);
+      for (int b = 0; b < 4; b++) {  // signal bars
+        int h = 2 + b * 2;
+        c.fillRect(W - 28 + b * 5, y + 8 - h, 3, h, b < bars ? col::OK : col::FAINT);
+      }
+      if (!n.open) {  // secured: a small padlock mark
+        c.setTextDatum(top_right);
+        c.setTextColor(col::ACCENT);
+        c.drawString("*", W - 34, y);
+        c.setTextDatum(top_left);
+      }
+    }
+    c.setTextColor(col::FAINT);
+    c.drawString("; . pick  enter ok  spc rescan  del back", 4, H - 9);
+  }
 
   void append(char ch) {
     size_t n = strlen(field);
@@ -174,9 +287,11 @@ class CloudScreen : public Screen {
       return;
     }
     switch (sel) {
-      case 0:
-        mode = Mode::Ssid;
-        strncpy(field, cloud::ssid(), sizeof(field) - 1);
+      case 0:  // choose a WiFi network from a scan
+        cloud::startScan();
+        scanSel = 0;
+        scanWas = true;
+        mode = Mode::Scan;
         break;
       case 1:  // sign in with email + password
         if (cloud::linked()) { toast("Signed in - sign out below to change"); break; }
