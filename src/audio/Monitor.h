@@ -25,5 +25,7 @@ void noteOn(uint8_t note, uint8_t vel, uint8_t timbre, uint8_t owner);
 void noteOff(uint8_t note, uint8_t owner);
 void drum(uint8_t gmNote, uint8_t vel);   // General MIDI drum number
 void allOff();
+void beep();                 // short test sound (kick + a note)
+const char* status();        // e.g. "synth ok 5231/0": blocks played / refused
 
 }  // namespace monitor

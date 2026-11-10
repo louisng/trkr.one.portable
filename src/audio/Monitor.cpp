@@ -1,6 +1,7 @@
 #include "Monitor.h"
 
 #include <M5Cardputer.h>
+#include <stdio.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <freertos/task.h>
@@ -13,9 +14,14 @@ static constexpr int SPEAKER_CHANNEL = 0;
 static constexpr int IDLE_BLOCKS = 200;    // after ~1.2 s of silence the stream pauses
 
 struct Cmd {
-  uint8_t type;  // 0 note on, 1 note off, 2 drum, 3 all off
+  uint8_t type;  // 0 note on, 1 note off, 2 drum, 3 all off, 4 test beep
   uint8_t note, vel, timbre, owner;
 };
+
+// For the Setup screen, so a silent speaker can be diagnosed without a computer.
+static volatile uint8_t state = 0;            // 0 not started, 1 streaming, 2 no speaker
+static volatile uint32_t blocksPlayed = 0, blocksRefused = 0;
+static int beepBlocksLeft = 0;
 
 static synth::Core* core = nullptr;
 static QueueHandle_t queue = nullptr;
@@ -32,6 +38,11 @@ static void apply(const Cmd& c) {
     case 1: core->noteOff(c.note, c.owner); break;
     case 2: core->drum(c.note, c.vel); break;
     case 3: core->allOff(); break;
+    case 4:  // test beep: a kick and a short electric-piano note
+      core->drum(36, 110);
+      core->noteOn(69, 100, synth::TB_EP, 9);
+      beepBlocksLeft = 45;  // ~0.25 s
+      break;
   }
 }
 
@@ -61,6 +72,7 @@ static void audioTask(void*) {
       vTaskDelay(pdMS_TO_TICKS(20));
       continue;
     }
+    if (beepBlocksLeft > 0 && --beepBlocksLeft == 0) core->noteOff(69, 9);
     core->render(bufs[cur], BLOCK);
     idle = (core->activeVoices() == 0 && core->activeDrums() == 0) ? idle + 1 : 0;
     int waited = 0;
@@ -68,8 +80,13 @@ static void audioTask(void*) {
       vTaskDelay(1);
       if (++waited > 50) break;   // the speaker has stalled: carry on rather than hang
     }
-    if (M5Cardputer.Speaker.playRaw(bufs[cur], BLOCK, SAMPLE_RATE, false, 1, SPEAKER_CHANNEL, false)) cur = (cur + 1) % 3;
-    else vTaskDelay(pdMS_TO_TICKS(10));   // refused (not ready): try again shortly
+    if (M5Cardputer.Speaker.playRaw(bufs[cur], BLOCK, SAMPLE_RATE, false, 1, SPEAKER_CHANNEL, false)) {
+      cur = (cur + 1) % 3;
+      blocksPlayed++;
+    } else {
+      blocksRefused++;
+      vTaskDelay(pdMS_TO_TICKS(10));   // refused (not ready): try again shortly
+    }
   }
 }
 
@@ -77,8 +94,14 @@ void begin() {
 #ifdef CMC_NO_AUDIO
   return;   // diagnostic build: no speaker at all
 #endif
-  // No working speaker (it failed to start on this board): stay silent instead of streaming into nothing.
-  if (!M5Cardputer.Speaker.isEnabled() || !M5Cardputer.Speaker.isRunning()) return;
+  // This M5 library starts the speaker the first time something plays, so it is NOT
+  // running yet here: start it explicitly. (An earlier version checked isRunning()
+  // instead, always concluded "no speaker" and silently disabled all sound.)
+  if (!M5Cardputer.Speaker.isEnabled() || !M5Cardputer.Speaker.begin()) {
+    state = 2;
+    return;
+  }
+  state = 1;
   core = new synth::Core((float)SAMPLE_RATE);
   queue = xQueueCreate(96, sizeof(Cmd));
   // Above the generator and network tasks (priority 1), pinned away from the main loop.
@@ -102,5 +125,14 @@ void drum(uint8_t gmNote, uint8_t vel) {
   if (enabled) send({2, gmNote, vel, 0, 0});
 }
 void allOff() { send({3, 0, 0, 0, 0}); }
+void beep() { if (enabled) send({4, 0, 0, 0, 0}); }
+
+const char* status() {
+  static char buf[32];
+  if (state == 1) snprintf(buf, sizeof(buf), "synth ok %lu/%lu", (unsigned long)blocksPlayed, (unsigned long)blocksRefused);
+  else if (state == 2) snprintf(buf, sizeof(buf), "NO SPEAKER");
+  else snprintf(buf, sizeof(buf), "synth off");
+  return buf;
+}
 
 }  // namespace monitor

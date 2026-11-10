@@ -75,7 +75,9 @@ class SetupScreen : public Screen {
     }
     c.setTextDatum(top_left);
     c.setTextColor(col::FAINT);
-    c.drawString(isAdv() ? "Cardputer ADV" : "Cardputer", 6, H - 9);
+    char info[48];
+    snprintf(info, sizeof(info), "%s  %s", isAdv() ? "ADV" : "CP", monitor::status());
+    c.drawString(info, 6, H - 9);
   }
 
  private:
@@ -118,6 +120,7 @@ class SetupScreen : public Screen {
         int v = settings.volume + d * 16;
         settings.volume = (uint8_t)(v < 0 ? 0 : v > 255 ? 255 : v);
         monitor::setVolume(settings.volume);
+        monitor::beep();   // so you can hear the new level
         break;
       }
       case IT_VELOCITY: {
