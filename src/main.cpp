@@ -106,6 +106,18 @@ static void showBootProblem(esp_reset_reason_t why, uint32_t died, uint32_t boot
   Serial.printf("BOOT PROBLEM why=%s stage=%u boots=%u\n", resetName(why), (unsigned)died, (unsigned)boots);
 }
 
+// The UI is 240 x 135. The two Cardputer models mount the panel differently, so
+// rotation 1 is landscape on one and portrait on the other: take the first
+// rotation (1 first, so the original board is unchanged) that is wider than tall.
+static void setLandscape() {
+  auto& d = M5Cardputer.Display;
+  static const uint8_t ORDER[] = {1, 0, 3, 2};
+  for (uint8_t r : ORDER) {
+    d.setRotation(r);
+    if (d.width() > d.height()) return;
+  }
+}
+
 void setup() {
   esp_reset_reason_t why = esp_reset_reason();
   bool valid = rtcMagic == RTC_MAGIC;
@@ -127,7 +139,7 @@ void setup() {
   }
   M5Cardputer.begin(cfg, true);
   stage(2);
-  M5Cardputer.Display.setRotation(1);
+  setLandscape();
   M5Cardputer.Display.setBrightness(120);
 
   if (crashed) {
