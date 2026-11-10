@@ -2,6 +2,7 @@
 // Runs on both M5Stack Cardputer and Cardputer ADV (board detected at boot).
 #include <M5Cardputer.h>
 #include <esp_attr.h>
+#include <esp_core_dump.h>
 #include <esp_system.h>
 
 #include "app/Settings.h"
@@ -75,11 +76,33 @@ static void showBootProblem(esp_reset_reason_t why, uint32_t died, uint32_t boot
   d.printf("boots: %u   free heap: %u\n", (unsigned)boots, (unsigned)esp_get_free_heap_size());
   d.setCursor(4, 56);
   d.printf("board: %s\n", M5.getBoard() == m5::board_t::board_M5CardputerADV ? "Cardputer ADV" : "Cardputer");
+  // The chip saved a report of the crash in flash: show where it happened.
+  d.setTextColor(TFT_GREEN);
+  auto* sum = (esp_core_dump_summary_t*)malloc(sizeof(esp_core_dump_summary_t));
+  if (sum && esp_core_dump_image_check() == ESP_OK && esp_core_dump_get_summary(sum) == ESP_OK) {
+    d.setCursor(4, 68);
+    d.printf("task: %.16s\n", sum->exc_task);
+    d.setCursor(4, 78);
+    d.printf("pc: %08x  cause: %u\n", (unsigned)sum->exc_pc, (unsigned)sum->ex_info.exc_cause);
+    d.setCursor(4, 88);
+    d.printf("addr: %08x  depth: %u\n", (unsigned)sum->ex_info.exc_vaddr, (unsigned)sum->exc_bt_info.depth);
+    uint32_t n = sum->exc_bt_info.depth < 16 ? sum->exc_bt_info.depth : 16;
+    Serial.printf("CRASH task=%.16s pc=%08x cause=%u vaddr=%08x\n", sum->exc_task, (unsigned)sum->exc_pc,
+                  (unsigned)sum->ex_info.exc_cause, (unsigned)sum->ex_info.exc_vaddr);
+    for (uint32_t i = 0; i < n && i < 9; i++) {
+      d.setCursor(4 + (i % 3) * 78, 98 + (i / 3) * 10);
+      d.printf("%08x", (unsigned)sum->exc_bt_info.bt[i]);
+      Serial.printf("  bt[%u]=%08x\n", (unsigned)i, (unsigned)sum->exc_bt_info.bt[i]);
+    }
+    esp_core_dump_image_erase();   // so an old report can't be mistaken for a new one
+  } else {
+    d.setCursor(4, 68);
+    d.println("(no crash report saved)");
+  }
+  free(sum);
   d.setTextColor(TFT_CYAN);
-  d.setCursor(4, 80);
-  d.println("Photo this screen and send it.");
-  d.setCursor(4, 96);
-  d.println("Any key = try starting normally.");
+  d.setCursor(4, 126);
+  d.println("Photo this. Any key = try again.");
   Serial.printf("BOOT PROBLEM why=%s stage=%u boots=%u\n", resetName(why), (unsigned)died, (unsigned)boots);
 }
 
