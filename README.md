@@ -12,7 +12,7 @@ USB MIDI sequencer for the Arduboy.
 
 - Play live from the whole keyboard: one-octave piano, 13 chord buttons, 12 drum pads
 - Bluetooth LE MIDI and USB MIDI, each switchable on/off at any time
-- Simple speaker preview so you can hear what you play without a host
+- A real synth on the speaker (see "The speaker synth"), so you can hear what you play without a host
 - Key-test screen to see how many keys your unit can read at once (ghosting)
 - Settings saved to flash
 - Songs from trkr.one: sync over WiFi, play over MIDI and the speaker (see below)
@@ -33,6 +33,7 @@ note for note by `test/host/run_gen.sh`).
 | `,` `/` | tempo − / + for this song |
 | `f` | **play-along mode**, cycles FREE → CHORD → SNAP → SCALE |
 | `l` | keep repeating the most recent song |
+| `'` | **parts page**: pick a part, set its MIDI channel, mute it |
 | `fn` + `1`…`8` | **mute / unmute a part**: kick, snare, hats, perc, bass, keys, lead, pad/arp |
 | `fn` + `9` | unmute everything |
 
@@ -49,15 +50,40 @@ current chord:
 - **SNAP**: a key outside the chord plays the nearest chord note instead.
 - **SCALE**: only notes that fit the chord's scale sound.
 
-Parts go out on fixed MIDI channels, the same as the website: lead 1, keys 2,
-bass 3, pad/arp 4, drums 10. The live piano/chord/drum channels are set in
-Setup.
+**Parts page** (`'`): `;` `.` pick a part, `,` `/` change its MIDI channel
+(1-16), `enter` mute it, `del` put its channel back. The defaults match the
+website: lead 1, keys 2, bass 3, pad/arp 4, and the four drum parts on 10, but
+each part is independent, so kick, snare, hats and perc can go to different
+drum machines. Changing a channel while a song plays lets go of the held notes
+on the old channel first, and it is kept between songs and restarts. The live
+piano/chord/drum channels are set in Setup.
 
 Songs are streamed: a background task builds them one 4-bar pattern at a time,
 so only the playing pattern and a few waiting ones are in memory (the
 generator needs about 36 KB at most). The next song starts building before the
 current one ends, so there's no gap. If free memory is too low to start, the
 screen says so (it shows the free memory while stopped).
+
+## The speaker synth
+
+The built-in speaker plays a real software synth (`src/audio/SynthCore.*`)
+instead of beeps, for everything the Cardputer sends over MIDI and for the
+keys you play:
+
+- 14 melodic voices with attack/decay/sustain/release envelopes and filters.
+  Each song part uses the instrument named by the song: electric piano and
+  piano (FM), pad (detuned saws), organ, brass, pluck, bell, lead, soft lead,
+  whistle, arp, and four basses (finger, synth, 808 sub with pitch drop, acid).
+- A synthesized drum kit: kick, snare, rim, clap, closed/open hat, three toms,
+  crash, ride, cowbell, tambourine, shaker and clave. Velocity changes the
+  loudness and brightness, and a closed hat chokes an open one.
+- Live keys: piano keys play the electric piano, chord buttons an organ.
+- It renders on its own high-priority task, 22.05 kHz mono, and goes to sleep
+  when nothing is sounding, so it never delays MIDI timing.
+
+The speaker is small, so expect it to sound thinner than the synth on a
+computer. `test/host/run_synth.sh <dir>` renders every genre to a WAV file
+(plus level, pitch and decay tests) so you can listen without flashing.
 
 ## Songs and trkr.one sync
 
@@ -149,7 +175,9 @@ The device advertises as **Cardputer MIDI**.
 
 ```sh
 test/host/run_gen.sh /path/to/trkr     # firmware generator == website generator, every genre, many seeds
-test/host/run_seq.sh                   # streamed playback == finished-song playback; late patterns lose nothing
+test/host/run_seq.sh                   # streamed playback == finished-song playback; late patterns lose nothing;
+                                       # channel remap leaves nothing hanging; whole audio chain levels
+test/host/run_synth.sh /some/dir       # speaker synth: pitch, levels, drums, headroom; WAVs of every genre
 test/host/run.sh song.trk              # TRKR file parser round trip
 ```
 To update the genre tables after changing genres on the website, run in the

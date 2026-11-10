@@ -5,15 +5,19 @@
 
 Settings settings;
 
-static const uint32_t SETTINGS_VERSION = 2;
+// Fields are only ever added at the end, so a save from an older version is
+// simply a shorter copy of the same layout: it loads as-is and the newer
+// fields keep their defaults.
+static const uint32_t SETTINGS_VERSION = 3;
 static Settings saved;  // copy of what is in flash, to skip redundant writes
 
 void settingsLoad() {
   Preferences prefs;
   if (!prefs.begin("cmc", true)) return;  // first boot: namespace doesn't exist yet
-  if (prefs.getUInt("ver", 0) == SETTINGS_VERSION &&
-      prefs.getBytesLength("s") == sizeof(Settings)) {
-    prefs.getBytes("s", &settings, sizeof(Settings));
+  uint32_t ver = prefs.getUInt("ver", 0);
+  size_t len = prefs.getBytesLength("s");
+  if (ver >= 1 && ver <= SETTINGS_VERSION && len > 0 && len <= sizeof(Settings)) {
+    prefs.getBytes("s", &settings, len);
   }
   prefs.end();
   saved = settings;

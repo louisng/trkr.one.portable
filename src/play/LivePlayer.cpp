@@ -51,22 +51,26 @@ uint8_t inversion() { return inv; }
 const char* lastPlayed() { return last; }
 bool keySounding(uint8_t k) { return k < layout::KEY_COUNT && held[k].channel != 0; }
 
-static void startNote(uint8_t ch, uint8_t note, bool drum, uint8_t pad) {
+// What the speaker plays for each kind of key: piano = electric piano,
+// chords = organ (sustains cleanly), drums = the synth drum kit.
+static void startNote(uint8_t ch, uint8_t note, Role role) {
   uint8_t& r = refs[(ch - 1) & 15][note & 127];
   if (r == 0) {
     midi::noteOn(ch, note, settings.velocity);
-    if (drum) monitor::drum(pad);
-    else monitor::noteOn(note);
+    if (role == Role::Drum) monitor::drum(note, settings.velocity);
+    else if (role == Role::Piano) monitor::noteOn(note, settings.velocity, monitor::Timbre::TB_EP, monitor::OWNER_LIVE_PIANO);
+    else monitor::noteOn(note, settings.velocity, monitor::Timbre::TB_ORGAN, monitor::OWNER_LIVE_CHORD);
   }
   if (r < 255) r++;
 }
 
-static void stopNote(uint8_t ch, uint8_t note, bool drum) {
+static void stopNote(uint8_t ch, uint8_t note, Role role) {
   uint8_t& r = refs[(ch - 1) & 15][note & 127];
   if (r == 0) return;
   if (--r == 0) {
     midi::noteOff(ch, note);
-    if (!drum) monitor::noteOff(note);
+    if (role == Role::Piano) monitor::noteOff(note, monitor::OWNER_LIVE_PIANO);
+    else if (role == Role::Chord) monitor::noteOff(note, monitor::OWNER_LIVE_CHORD);
   }
 }
 
@@ -95,7 +99,7 @@ static void press(uint8_t k, const layout::KeyDef& def) {
       if (n >= 0 && noteFilter) n = noteFilter(n);
       if (n < 0) return;
       h = {settings.pianoCh, 1, {(uint8_t)n}};
-      startNote(h.channel, (uint8_t)n, false, 0);
+      startNote(h.channel, (uint8_t)n, Role::Piano);
       theory::formatNote((uint8_t)n, last);
       break;
     }
@@ -114,14 +118,14 @@ static void press(uint8_t k, const layout::KeyDef& def) {
       h.channel = settings.chordCh;
       h.count = c.count;
       memcpy(h.notes, c.notes, c.count);
-      for (uint8_t i = 0; i < c.count; i++) startNote(h.channel, c.notes[i], false, 0);
+      for (uint8_t i = 0; i < c.count; i++) startNote(h.channel, c.notes[i], Role::Chord);
       snprintf(last, sizeof(last), "%s", c.name);
       break;
     }
     case Role::Drum: {
       uint8_t pad = def.value % 12;
       h = {settings.drumCh, 1, {DRUM_NOTES[pad]}};
-      startNote(h.channel, DRUM_NOTES[pad], true, pad);
+      startNote(h.channel, DRUM_NOTES[pad], Role::Drum);
       snprintf(last, sizeof(last), "%s", DRUM_NAMES[pad]);
       break;
     }
@@ -133,8 +137,7 @@ static void press(uint8_t k, const layout::KeyDef& def) {
 static void release(uint8_t k, const layout::KeyDef& def) {
   Held& h = held[k];
   if (!h.channel) return;
-  bool drum = def.role == Role::Drum;
-  for (uint8_t i = 0; i < h.count; i++) stopNote(h.channel, h.notes[i], drum);
+  for (uint8_t i = 0; i < h.count; i++) stopNote(h.channel, h.notes[i], def.role);
   h.channel = 0;
   h.count = 0;
 }

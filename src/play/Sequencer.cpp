@@ -28,35 +28,18 @@ static uint32_t streamBase = 0;           // absolute step at which the current 
 struct Pending {
   uint32_t at;
   uint8_t ch, note, vel;
-  uint8_t kind;  // 0 = off, 1 = on, 2 = drum hit (speaker one-shot)
+  uint8_t kind;    // 0 = off, 1 = on, 2 = drum hit (speaker one-shot)
+  uint8_t timbre;  // speaker sound; 0xFF for drums
+  uint8_t owner;   // track number
   bool active;
 };
 static constexpr uint8_t QUEUE = 192;
 static Pending queue[QUEUE];
 
-// GM drum note → speaker drum pad (matches the Cardputer's 12 pads).
-static int8_t padFor(uint8_t note) {
-  switch (note) {
-    case 35: case 36: return 0;
-    case 38: case 40: return 1;
-    case 37: return 2;
-    case 39: return 3;
-    case 42: case 44: case 54: case 70: return 4;
-    case 46: return 5;
-    case 41: case 43: return 6;
-    case 45: case 47: return 7;
-    case 48: case 50: return 8;
-    case 49: case 52: case 55: case 57: return 9;
-    case 51: case 53: case 59: return 10;
-    case 56: return 11;
-    default: return 2;
-  }
-}
-
-static void push(uint32_t at, uint8_t ch, uint8_t note, uint8_t vel, uint8_t kind) {
+static void push(uint32_t at, uint8_t ch, uint8_t note, uint8_t vel, uint8_t kind, uint8_t timbre, uint8_t owner) {
   for (auto& p : queue)
     if (!p.active) {
-      p = {at, ch, note, vel, kind, true};
+      p = {at, ch, note, vel, kind, timbre, owner, true};
       return;
     }
   // Queue full: play it now rather than drop a note-off.
@@ -66,11 +49,11 @@ static void push(uint32_t at, uint8_t ch, uint8_t note, uint8_t vel, uint8_t kin
 static void fire(const Pending& p) {
   if (p.kind == 0) {
     midi::noteOff(p.ch, p.note);
-    if (p.ch != 10) monitor::noteOff(p.note);
+    if (p.timbre != 0xFF) monitor::noteOff(p.note, p.owner);
   } else {
     midi::noteOn(p.ch, p.note, p.vel);
-    if (p.kind == 2) monitor::drum(padFor(p.note));
-    else monitor::noteOn(p.note);
+    if (p.kind == 2) monitor::drum(p.note, p.vel);
+    else monitor::noteOn(p.note, p.vel, p.timbre, p.owner);
   }
 }
 
@@ -138,11 +121,10 @@ bool finished() { return finishedFlag; }
 
 void silenceTrack(uint8_t t) {
   if (t >= songData.trackCount) return;
-  const song::Track& tr = songData.tracks[t];
-  if (tr.type == song::TrackType::Drum) return;  // drum hits are one-shots
+  if (songData.tracks[t].type == song::TrackType::Drum) return;  // drum hits are one-shots
   for (auto& p : queue)
-    if (p.active && p.ch == tr.ch) {
-      if (p.kind == 0) fire(p);
+    if (p.active && p.owner == t) {
+      if (p.kind == 0) fire(p);   // let go of notes that are sounding
       p.active = false;
     }
 }
@@ -185,11 +167,12 @@ static void scheduleStep(uint32_t t0) {
     uint32_t dur = (uint32_t)e.len24 * stepUs / 24;
     if (dur < 5000) dur = 5000;
     bool drum = t.type == song::TrackType::Drum;
+    uint8_t timbre = drum ? 0xFF : monitor::timbreFor(t.voice, (uint8_t)t.type);
     uint32_t strumUs = (uint32_t)t.strum * stepUs / 24;  // chord notes arrive one after another
     for (uint8_t k = 0; k < e.count; k++) {
       uint32_t at = on + k * strumUs;
-      push(at, t.ch, e.notes[k], e.vel, drum ? 2 : 1);
-      push(at + dur - 1000, t.ch, e.notes[k], 0, 0);
+      push(at, t.ch, e.notes[k], e.vel, drum ? 2 : 1, timbre, e.track);
+      push(at + dur - 1000, t.ch, e.notes[k], 0, 0, timbre, e.track);
     }
   }
   playingStep = absStep;

@@ -4,6 +4,7 @@
 //   ;  .       previous / next genre  ,  /      tempo - / +
 //   f          play-along mode: FREE > CHORD > SNAP > SCALE
 //   l          loop this song (don't move on)
+//   '          parts page: pick a part, change its MIDI channel, mute it
 //   fn + 1-8   mute / unmute a part (kick snare hats perc bass keys lead pad)
 //   fn + 9     unmute everything
 //
@@ -27,6 +28,7 @@ namespace ui {
 static constexpr uint8_t IDX_FN = 2 * 14 + 0;
 static constexpr uint8_t IDX_F = 2 * 14 + 5;      // play-along mode
 static constexpr uint8_t IDX_L = 2 * 14 + 10;     // loop this song
+static constexpr uint8_t IDX_QUOTE = 2 * 14 + 12; // parts page
 static constexpr uint8_t IDX_NUM1 = 1;            // key "1"; digits 1..9 are indices 1..9
 
 class GenScreen : public Screen {
@@ -87,11 +89,17 @@ class GenScreen : public Screen {
     } else if (idx == IDX_L) {
       genmode::setLocked(!genmode::locked());
       toast(genmode::locked() ? "Looping this song" : "Moving on after this song");
+    } else if (idx == IDX_QUOTE) {
+      partsPage = !partsPage;
     }
     markDirty();
   }
 
   void onAction(uint8_t a) override {
+    if (partsPage && partsAction(a)) {
+      markDirty();
+      return;
+    }
     switch (a) {
       case layout::ACT_PLAY:
         genmode::toggle();
@@ -127,6 +135,8 @@ class GenScreen : public Screen {
       for (; *c; c++) sig = sig * 31 + (uint8_t)*c;
     }
     sig = sig * 31 + genmode::genre();
+    sig = sig * 31 + partsPage * 17 + partSel;
+    for (uint8_t t = 0; t < genmode::TRACKS; t++) sig = sig * 31 + genmode::channelOf(t) + 16 * genmode::trackMuted(t);
     sig = sig * 31 + genmode::currentBpm();
     if (sig != lastSig) {
       lastSig = sig;
@@ -136,6 +146,10 @@ class GenScreen : public Screen {
 
   void draw(M5Canvas& c) override {
     followKey();
+    if (partsPage) {
+      drawParts(c);
+      return;
+    }
     c.setFont(&fonts::Font0);
     c.setTextDatum(top_left);
 
@@ -210,6 +224,58 @@ class GenScreen : public Screen {
   bool savedPianoMode = false;
   uint32_t lastSig = 0;
   uint64_t taken = 0;
+  bool partsPage = false;
+  uint8_t partSel = 0;
+
+  // Parts page keys: ; . pick a part, , / its MIDI channel, enter mute, del reset.
+  bool partsAction(uint8_t a) {
+    switch (a) {
+      case layout::ACT_UP: partSel = (partSel + genmode::TRACKS - 1) % genmode::TRACKS; return true;
+      case layout::ACT_DOWN: partSel = (partSel + 1) % genmode::TRACKS; return true;
+      case layout::ACT_LEFT:
+        genmode::setChannel(partSel, genmode::channelOf(partSel) == 1 ? 16 : genmode::channelOf(partSel) - 1);
+        return true;
+      case layout::ACT_RIGHT:
+        genmode::setChannel(partSel, genmode::channelOf(partSel) == 16 ? 1 : genmode::channelOf(partSel) + 1);
+        return true;
+      case layout::ACT_ENTER: genmode::toggleMute(partSel); return true;
+      case layout::ACT_DELETE:
+        genmode::resetChannel(partSel);
+        toast("Channel reset");
+        return true;
+      default: return false;  // space etc. still work
+    }
+  }
+
+  void drawParts(M5Canvas& c) {
+    static const char* const NAMES[genmode::TRACKS] = {"Kick", "Snare", "Hats", "Perc", "Bass", "Keys", "Lead", "Pad/Arp"};
+    c.setFont(&fonts::Font0);
+    c.setTextDatum(top_left);
+    c.setTextColor(col::ACCENT);
+    c.drawString("PARTS", 4, 17);
+    c.setTextColor(col::DIM);
+    c.drawString("' = back", 50, 17);
+    for (uint8_t i = 0; i < genmode::TRACKS; i++) {
+      int y = 29 + i * 11;
+      if (i == partSel) c.fillRect(0, y - 1, W, 11, col::SELECT);
+      bool muted = genmode::trackMuted(i);
+      c.setTextColor(muted ? col::DIM : col::TEXT);
+      char row[24];
+      snprintf(row, sizeof(row), "%u  %s", i + 1, i < genmode::trackCount() ? genmode::trackName(i) : NAMES[i]);
+      c.drawString(row, 6, y);
+      uint8_t ch = genmode::channelOf(i);
+      bool changed = ch != genmode::defaultChannel(i);
+      c.setTextColor(changed ? col::ACCENT : col::TEXT);
+      snprintf(row, sizeof(row), "ch %2u%s", ch, changed ? "*" : " ");
+      c.drawString(row, 110, y);
+      c.setTextDatum(top_right);
+      c.setTextColor(muted ? col::DRUM : col::OK);
+      c.drawString(muted ? "MUTED" : "on", W - 6, y);
+      c.setTextDatum(top_left);
+    }
+    c.setTextColor(col::FAINT);
+    c.drawString("; . pick  , / channel  ent mute  del reset", 4, H - 9);
+  }
 
   // Chord buttons and scale mode follow the song's key while this screen is up.
   void followKey() {

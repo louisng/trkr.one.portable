@@ -1,105 +1,94 @@
 #include "Monitor.h"
 
 #include <M5Cardputer.h>
-#include <math.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/queue.h>
+#include <freertos/task.h>
 
 namespace monitor {
 
-static constexpr uint8_t CHANNELS = 8;
+static constexpr uint32_t SAMPLE_RATE = 22050;
+static constexpr int BLOCK = 128;          // 5.8 ms per block; two queued = ~12 ms of latency
+static constexpr int SPEAKER_CHANNEL = 0;
+static constexpr int IDLE_BLOCKS = 200;    // after ~1.2 s of silence the stream pauses
 
-struct Slot {
-  uint8_t note;      // 0xFF = free
-  uint32_t until;    // millis() when a one-shot (drum) frees itself; 0 = held
-  uint32_t started;  // for voice stealing
+struct Cmd {
+  uint8_t type;  // 0 note on, 1 note off, 2 drum, 3 all off
+  uint8_t note, vel, timbre, owner;
 };
 
-static Slot slots[CHANNELS];
-static bool on = true;
+static synth::Core* core = nullptr;
+static QueueHandle_t queue = nullptr;
+static volatile bool enabled = true;
+static int16_t bufs[3][BLOCK];   // one playing, one queued, one being filled
 
-// One period of a soft square-ish wave for notes, and a block of noise for
-// drums (played back as a looping "period", it sounds like filtered noise).
-static uint8_t toneWave[16];
-static uint8_t noiseWave[256];
-
-void begin() {
-  for (auto& s : slots) s = {0xFF, 0, 0};
-  for (uint8_t i = 0; i < 16; i++) toneWave[i] = (i < 8) ? 168 : 88;
-  uint32_t lfsr = 0xACE1u;
-  for (uint16_t i = 0; i < sizeof(noiseWave); i++) {
-    lfsr = (lfsr >> 1) ^ (-(lfsr & 1u) & 0xB400u);
-    noiseWave[i] = (uint8_t)(64 + (lfsr & 0x7F));
-  }
-  M5Cardputer.Speaker.setAllChannelVolume(110);
+static void send(const Cmd& c) {
+  if (queue) xQueueSend(queue, &c, 0);  // never wait: dropping a note beats stalling MIDI
 }
 
-void setEnabled(bool en) {
-  if (!en) allOff();
-  on = en;
+static void apply(const Cmd& c) {
+  switch (c.type) {
+    case 0: core->noteOn(c.note, c.vel, c.timbre, c.owner); break;
+    case 1: core->noteOff(c.note, c.owner); break;
+    case 2: core->drum(c.note, c.vel); break;
+    case 3: core->allOff(); break;
+  }
+}
+
+static void audioTask(void*) {
+  int cur = 0, idle = 0;
+  for (;;) {
+    Cmd c;
+    bool silent = core->activeVoices() == 0 && core->activeDrums() == 0;
+    // Nothing sounding for a while: sleep until the next command arrives.
+    if (silent && idle >= IDLE_BLOCKS) {
+      if (xQueueReceive(queue, &c, pdMS_TO_TICKS(100)) == pdTRUE) {
+        apply(c);
+        idle = 0;
+      } else {
+        continue;
+      }
+    }
+    while (xQueueReceive(queue, &c, 0) == pdTRUE) {
+      if (enabled || c.type == 3) apply(c);
+      idle = 0;
+    }
+    if (!enabled) {
+      core->allOff();
+      vTaskDelay(pdMS_TO_TICKS(20));
+      continue;
+    }
+    core->render(bufs[cur], BLOCK);
+    idle = (core->activeVoices() == 0 && core->activeDrums() == 0) ? idle + 1 : 0;
+    while (M5Cardputer.Speaker.isPlaying(SPEAKER_CHANNEL) >= 2) vTaskDelay(1);
+    M5Cardputer.Speaker.playRaw(bufs[cur], BLOCK, SAMPLE_RATE, false, 1, SPEAKER_CHANNEL, false);
+    cur = (cur + 1) % 3;
+  }
+}
+
+void begin() {
+  core = new synth::Core((float)SAMPLE_RATE);
+  queue = xQueueCreate(96, sizeof(Cmd));
+  // Above the generator and network tasks (priority 1), pinned away from the main loop.
+  xTaskCreatePinnedToCore(audioTask, "audio", 6144, nullptr, 3, nullptr, 0);
+}
+
+void setEnabled(bool on) {
+  enabled = on;
+  if (!on) send({3, 0, 0, 0, 0});
 }
 
 void setVolume(uint8_t v) { M5Cardputer.Speaker.setVolume(v); }
 
-static float noteFreq(uint8_t note) { return 440.0f * powf(2.0f, ((int)note - 69) / 12.0f); }
+uint8_t timbreFor(const char* voice, uint8_t trackType) { return synth::timbreForVoice(voice, trackType); }
 
-static uint8_t allocSlot() {
-  uint32_t now = millis();
-  uint8_t oldest = 0;
-  for (uint8_t i = 0; i < CHANNELS; i++) {
-    Slot& s = slots[i];
-    if (s.note != 0xFF && s.until && (int32_t)(now - s.until) >= 0) s.note = 0xFF;  // expired drum
-    if (s.note == 0xFF) return i;
-    if ((int32_t)(s.started - slots[oldest].started) < 0) oldest = i;
-  }
-  M5Cardputer.Speaker.stop(oldest);
-  return oldest;  // steal the oldest voice
+void noteOn(uint8_t note, uint8_t vel, uint8_t timbre, uint8_t owner) {
+  if (enabled) send({0, note, vel, timbre, owner});
 }
-
-void noteOn(uint8_t note) {
-  if (!on) return;
-  uint8_t ch = allocSlot();
-  slots[ch] = {note, 0, millis()};
-  M5Cardputer.Speaker.tone(noteFreq(note), UINT32_MAX, ch, true, toneWave, sizeof(toneWave));
+void noteOff(uint8_t note, uint8_t owner) { send({1, note, 0, 0, owner}); }
+void drum(uint8_t gmNote, uint8_t vel) {
+  if (enabled) send({2, gmNote, vel, 0, 0});
 }
-
-void noteOff(uint8_t note) {
-  for (uint8_t i = 0; i < CHANNELS; i++) {
-    if (slots[i].note == note && slots[i].until == 0) {
-      M5Cardputer.Speaker.stop(i);
-      slots[i].note = 0xFF;
-      return;
-    }
-  }
-}
-
-// pad -> (frequency, duration ms, noisy?)
-struct DrumVoice {
-  float freq;
-  uint16_t ms;
-  bool noise;
-};
-static const DrumVoice DRUMS[12] = {
-    {55, 120, false},  {180, 90, true},  {900, 30, false}, {120, 70, true},
-    {160, 25, true},   {160, 140, true}, {90, 110, false}, {130, 100, false},
-    {180, 90, false},  {110, 400, true}, {220, 250, true}, {800, 80, false},
-};
-
-void drum(uint8_t pad) {
-  if (!on || pad >= 12) return;
-  const DrumVoice& d = DRUMS[pad];
-  uint8_t ch = allocSlot();
-  uint32_t now = millis();
-  slots[ch] = {(uint8_t)(0x80 | pad), now + d.ms, now};
-  if (d.noise)
-    M5Cardputer.Speaker.tone(d.freq, d.ms, ch, true, noiseWave, sizeof(noiseWave));
-  else
-    M5Cardputer.Speaker.tone(d.freq, d.ms, ch, true, toneWave, sizeof(toneWave));
-}
-
-void allOff() {
-  for (uint8_t i = 0; i < CHANNELS; i++) {
-    M5Cardputer.Speaker.stop(i);
-    slots[i].note = 0xFF;
-  }
-}
+void allOff() { send({3, 0, 0, 0, 0}); }
 
 }  // namespace monitor

@@ -50,7 +50,13 @@ void setLocked(bool on);
 // Tempo of the playing song
 void nudgeTempo(int delta);
 
-// Mutes ("channels"): kept across songs
+// MIDI channel of each part (kick snare hats perc bass keys lead pad/arp)
+uint8_t channelOf(uint8_t track);
+void setChannel(uint8_t track, uint8_t ch);   // 1-16
+void resetChannel(uint8_t track);
+uint8_t defaultChannel(uint8_t track);
+
+// Mutes: kept across songs
 bool trackMuted(uint8_t track);
 void toggleMute(uint8_t track);
 void unmuteAll();

@@ -19,6 +19,8 @@ struct Settings {
   uint8_t genGenre = 0;    // selected genre (index into gen::GENRE_LIST)
   uint8_t genAlong = 1;    // play-along mode: 0 free, 1 chord tones, 2 snap to chord, 3 scale
   uint16_t genMuted = 0;   // bit n = generated track n is muted (kept between songs)
+  // MIDI channel of each generated part: kick snare hats perc bass keys lead pad/arp
+  uint8_t genCh[8] = {10, 10, 10, 10, 3, 2, 1, 4};
 };
 
 extern Settings settings;

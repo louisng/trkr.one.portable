@@ -78,7 +78,10 @@ static bool qPush(QItem&& it) {
 }
 
 static void applyMutes(song::Song& s) {
-  for (uint8_t i = 0; i < s.trackCount && i < TRACKS; i++) s.tracks[i].mute = (settings.genMuted >> i) & 1;
+  for (uint8_t i = 0; i < s.trackCount && i < TRACKS; i++) {
+    s.tracks[i].mute = (settings.genMuted >> i) & 1;
+    s.tracks[i].ch = settings.genCh[i];   // the parts' MIDI channels are the user's, not the song's
+  }
 }
 
 // Consumer side: the sequencer pulls patterns from here.
@@ -240,6 +243,21 @@ void nudgeTempo(int delta) {
 void tick() {
   // Nothing to do on the main thread: the sequencer pulls patterns itself.
 }
+
+// ── channels ─────────────────────────────────────────────────────────────────
+static const uint8_t DEFAULT_CH[TRACKS] = {10, 10, 10, 10, 3, 2, 1, 4};
+uint8_t defaultChannel(uint8_t t) { return t < TRACKS ? DEFAULT_CH[t] : 1; }
+uint8_t channelOf(uint8_t t) { return t < TRACKS ? settings.genCh[t] : 1; }
+
+void setChannel(uint8_t t, uint8_t ch) {
+  if (t >= TRACKS) return;
+  ch = (uint8_t)constrain((int)ch, 1, 16);
+  if (settings.genCh[t] == ch) return;
+  if (seq::loaded() && t < seq::current().trackCount) seq::silenceTrack(t);  // let go of held notes on the old channel
+  settings.genCh[t] = ch;
+  if (seq::loaded() && t < seq::current().trackCount) seq::current().tracks[t].ch = ch;
+}
+void resetChannel(uint8_t t) { setChannel(t, defaultChannel(t)); }
 
 // ── mutes ────────────────────────────────────────────────────────────────────
 bool trackMuted(uint8_t t) { return t < TRACKS && ((settings.genMuted >> t) & 1); }
