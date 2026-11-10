@@ -1,4 +1,5 @@
 #include <M5Cardputer.h>
+#include <new>
 #include <string.h>
 
 #include "../app/Settings.h"
@@ -13,7 +14,12 @@
 
 namespace ui {
 
-static M5Canvas canvas(&M5Cardputer.Display);
+// The screen buffer needs the display object, which only exists once the M5 library has
+// started. A plain global would be built during static start-up, in an order the linker
+// picks, and could capture a null display (it crashed on pushSprite). So it is built in
+// begin(), in place.
+alignas(M5Canvas) static unsigned char canvasMem[sizeof(M5Canvas)];
+static M5Canvas& canvas = *reinterpret_cast<M5Canvas*>(canvasMem);
 static Screen* current = nullptr;
 static bool dirty = true;
 static uint32_t lastDraw = 0;
@@ -205,6 +211,7 @@ static void render() {
 }
 
 void begin() {
+  new (canvasMem) M5Canvas(&M5Cardputer.Display);
   adv = M5.getBoard() == m5::board_t::board_M5CardputerADV;
   canvas.setColorDepth(16);
   canvas.createSprite(W, H);
