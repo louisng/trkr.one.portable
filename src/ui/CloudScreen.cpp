@@ -7,10 +7,14 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <esp_heap_caps.h>
+
 #include "../input/KeyInput.h"
 #include "../input/KeyLayout.h"
 #include "../net/Cloud.h"
 #include "Screen.h"
+
+extern uint32_t g_bootHeap[11];
 
 namespace ui {
 
@@ -44,7 +48,13 @@ class CloudScreen : public Screen {
 
   void onRawKey(uint8_t idx, bool pressed) override {
     if (!pressed) { eatEnter = false; return; }
-    if (mode == Mode::Menu || mode == Mode::Scan) return;
+    if (mode == Mode::Heap) { mode = Mode::Menu; return; }  // any key goes back
+    if (mode == Mode::Menu) {
+      const char* k = layout::keyCapLabel(idx / layout::COLS, idx % layout::COLS);
+      if (strcmp(k, "h") == 0) { mode = Mode::Heap; markDirty(); }
+      return;
+    }
+    if (mode == Mode::Scan) return;
     const char* cap = layout::keyCapLabel(idx / layout::COLS, idx % layout::COLS);
     if (strcmp(cap, "del") == 0) {
       size_t n = strlen(field);
@@ -83,6 +93,10 @@ class CloudScreen : public Screen {
     c.setTextDatum(top_left);
     if (mode == Mode::Scan) {
       drawScan(c);
+      return;
+    }
+    if (mode == Mode::Heap) {
+      drawHeap(c);
       return;
     }
     if (mode != Mode::Menu) {
@@ -157,11 +171,11 @@ class CloudScreen : public Screen {
       snprintf(buf, sizeof(buf), "last sync %lus ago", (unsigned long)((millis() - cloud::lastSyncMs()) / 1000));
       c.drawString(buf, 8, 104);
     }
-    c.drawString(cloud::busy() ? "enter = cancel" : ";. move  enter choose", 8, H - 14);
+    c.drawString(cloud::busy() ? "enter = cancel" : ";. move  enter choose  h memory", 8, H - 14);
   }
 
  private:
-  enum class Mode : uint8_t { Menu, Ssid, Pass, Email, LoginPass, Scan };
+  enum class Mode : uint8_t { Menu, Ssid, Pass, Email, LoginPass, Scan, Heap };
   static constexpr int ITEMS = 5;
   Mode mode = Mode::Menu;
   int sel = 0;
@@ -213,6 +227,33 @@ class CloudScreen : public Screen {
       }
       default: break;
     }
+  }
+
+  // Free memory (KB) after each start-up step, and the cost of each step.
+  void drawHeap(M5Canvas& c) {
+    static const char* names[11] = {"", "start", "M5 + display", "rotate", "settings", "speaker synth",
+                                    "midi (BLE+USB)", "keys", "files + cloud", "sequencer + gen", "screen buffer"};
+    c.setTextColor(col::ACCENT);
+    c.drawString("free KB after each start step", 6, 16);
+    c.setTextColor(col::TEXT);
+    char line[48];
+    for (int i = 1; i <= 10; i++) {
+      long d = i > 1 ? (long)g_bootHeap[i] - (long)g_bootHeap[i - 1] : 0;
+      snprintf(line, sizeof(line), "%-15s %4u", names[i], (unsigned)(g_bootHeap[i] / 1024));
+      c.setTextColor(col::TEXT);
+      c.drawString(line, 6, 26 + (i - 1) * 9);
+      if (i > 1) {
+        snprintf(line, sizeof(line), "%+ld", d / 1024);
+        c.setTextColor(d < -8192 ? col::DRUM : col::DIM);
+        c.drawString(line, 130, 26 + (i - 1) * 9);
+      }
+    }
+    snprintf(line, sizeof(line), "now %u  block %u  min %u",
+             (unsigned)(esp_get_free_heap_size() / 1024),
+             (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) / 1024),
+             (unsigned)(esp_get_minimum_free_heap_size() / 1024));
+    c.setTextColor(col::OK);
+    c.drawString(line, 6, 26 + 10 * 9);
   }
 
   void drawScan(M5Canvas& c) {

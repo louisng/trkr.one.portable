@@ -24,7 +24,12 @@ static constexpr uint32_t RTC_MAGIC = 0xB007D1A6;
 RTC_NOINIT_ATTR static uint32_t rtcMagic;
 RTC_NOINIT_ATTR static uint32_t rtcStage;
 RTC_NOINIT_ATTR static uint32_t rtcBoots;
-static inline void stage(uint32_t n) { rtcStage = n; }
+// Free memory after each start-up step (read on the Cloud screen: press h).
+uint32_t g_bootHeap[11] = {0};
+static inline void stage(uint32_t n) {
+  rtcStage = n;
+  if (n <= 10) g_bootHeap[n] = esp_get_free_heap_size();
+}
 
 static const char* const STAGE_NAMES[] = {
     "(none)",
