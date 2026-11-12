@@ -233,8 +233,10 @@ static bool wifiUp() {
     reasons[attempt] = lastReason;
   }
   snprintf(msg, sizeof(msg), "WiFi: %s (%u)", reasonText(reasons[2]), (unsigned)reasons[2]);
-  snprintf(detailBuf, sizeof(detailBuf), "ch%d %s %ddBm pw%d tries %u/%u/%u", ch, authName(auth), rssi,
-           (int)strlen(cfgPass), reasons[0], reasons[1], reasons[2]);
+  snprintf(detailBuf, sizeof(detailBuf), "ch%d %s %d t%u/%u/%u heap %uk/%uk min %uk", ch, authName(auth), rssi,
+           reasons[0], reasons[1], reasons[2], (unsigned)(esp_get_free_heap_size() / 1024),
+           (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) / 1024),
+           (unsigned)(esp_get_minimum_free_heap_size() / 1024));
   return false;
 }
 
