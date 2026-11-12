@@ -30,6 +30,7 @@ bool lowMemory();       // couldn't build: not enough free memory
 bool rebuilding();      // the playing song was freed to make room: the next one is being built (a gap)
 bool prefetchBlocked(); // too little RAM to build the next song while this one plays
 int freeHeapKb();
+int needKb();           // free memory the chosen genre needs to build a song
 int largestBlockKb();  // the biggest single piece of free memory
 
 int genreCount();

@@ -75,7 +75,7 @@ class GenScreen : public Screen {
     const genmode::State st = genmode::state();
     if (genmode::lowMemory()) {
       c.setTextColor(col::DRUM);
-      snprintf(line, sizeof(line), "low RAM %dK free blk %dK need 75K", genmode::freeHeapKb(), genmode::largestBlockKb());
+      snprintf(line, sizeof(line), "low RAM %dK free blk %dK need %dK", genmode::freeHeapKb(), genmode::largestBlockKb(), genmode::needKb());
     } else if (st == genmode::State::Idle) {
       c.setTextColor(col::DIM);
       snprintf(line, sizeof(line), "space = start   (%d KB free)", genmode::freeHeapKb());
@@ -143,9 +143,9 @@ class GenScreen : public Screen {
       c.drawString(line, W - 4, 53);
       c.setTextDatum(top_left);
     }
-    if (st != genmode::State::Idle && bleUnloadedForGenerate()) {
+    if (st != genmode::State::Idle && genOutputNote()[0]) {
       c.setTextColor(col::DIM);
-      c.drawString("Bluetooth is off while this runs", 6, 94);
+      c.drawString(genOutputNote(), 6, 94);
     }
     c.setTextColor(col::FAINT);
     c.drawString(", / genre  ; . keys  enter new  space play", 4, H - 20);

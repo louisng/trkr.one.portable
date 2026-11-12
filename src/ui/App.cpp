@@ -474,42 +474,52 @@ static void setLowColor(bool on) {
 
 // Generated mode builds the next song while one plays: that needs the RAM the
 // 16-bit screen buffer holds, so the screen runs in 8-bit colour meanwhile.
-static bool genSynthPaused = false;
-
-// While Generated mode runs, Bluetooth is unloaded if nothing is connected
-// over it (~56 KB back). Unloading can take a moment (it waits for the connect-out
-// worker), so it happens on a small task, never in the UI loop.
+// Generated mode plays through the built-in speaker OR through MIDI, not both,
+// and what the other way needs is released to make room (decided when it starts):
+//   a MIDI device is connected -> the speaker driver is released (~18 KB);
+//                                 Bluetooth stays only if that device is on Bluetooth
+//   nothing connected          -> the speaker plays; Bluetooth is unloaded (~56 KB)
+// Unloading Bluetooth can take a moment (it waits for the connect-out worker), so it
+// happens on a small task, never in the UI loop.
+static bool genLatched = false, genSynthOff = false;
 static volatile int genBle = 0;  // 0 loaded, 1 unloading, 2 unloaded
 static uint32_t genStoppedAt = 0;
+static char genNote[40] = "";
 static void bleUnloadTask(void*) {
   midi::pauseBle();
   genBle = 2;
   vTaskDelete(nullptr);
 }
-bool bleUnloadedForGenerate() { return genBle == 2; }
+const char* genOutputNote() { return genNote; }
 
 static void genColorTick() {
-  if (jobMode) return;  // a cloud job decides the colour depth and the speaker
+  if (jobMode) return;  // a cloud job decides the colour depth, the speaker and Bluetooth
   const bool want = genmode::running();
   if (want != lowColor && (int32_t)(millis() - colorRetryAt) >= 0) setLowColor(want);
-  // With the built-in sound off (MIDI only) its speaker driver isn't needed: ~18 KB back.
-  const bool synthOff = want && !settings.speaker;
-  if (synthOff && !genSynthPaused) {
-    synth::pause();
-    genSynthPaused = true;
-  } else if (!synthOff && genSynthPaused) {
-    synth::resume();
-    genSynthPaused = false;
-  }
-  // Bluetooth: unload when it isn't in use; bring it back once the screen is back to full colour
-  // (the screen needs one big block of memory, so Bluetooth goes last), or after 8 s regardless.
-  if (want) {
+
+  if (want && !genLatched) {  // Generated mode just started: decide what to switch off
+    genLatched = true;
     genStoppedAt = 0;
-    if (genBle == 0 && midi::bleState() != midi::LinkState::Connected) {
+    const bool bleConn = midi::bleState() == midi::LinkState::Connected;
+    const bool midiConn = bleConn || midi::usbState() == midi::LinkState::Connected;
+    genSynthOff = midiConn || !settings.speaker;
+    if (genSynthOff) synth::pause();
+    if (!bleConn && genBle == 0) {
       genBle = 1;
       if (xTaskCreatePinnedToCore(bleUnloadTask, "bleoff", 8192, nullptr, 1, nullptr, 0) != pdPASS) genBle = 0;
     }
-  } else if (genBle == 2) {
+    snprintf(genNote, sizeof(genNote), "%s", midiConn ? (bleConn ? "MIDI out: speaker off" : "MIDI out: speaker, Bluetooth off")
+                                                       : "speaker: Bluetooth off");
+    if (!midiConn && !settings.speaker) snprintf(genNote, sizeof(genNote), "no sound: speaker and MIDI off");
+  } else if (!want && genLatched) {  // switched off: give things back
+    if (genSynthOff) synth::resume();
+    genSynthOff = false;
+    genLatched = false;
+    genNote[0] = 0;
+  }
+  // Bluetooth comes back once the screen is back to full colour (the screen needs one big
+  // block of memory, so Bluetooth goes last), or after 8 s regardless.
+  if (!want && genBle == 2) {
     if (!genStoppedAt) genStoppedAt = millis();
     if (!lowColor || millis() - genStoppedAt > 8000) {
       midi::resumeBle();

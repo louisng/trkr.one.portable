@@ -176,8 +176,16 @@ classic tracker layout: `q w e r t y u i o p [ ] \` are white keys (C up to A) a
     arrangement starts over. Mutes, and channels you changed, carry over to the next song.
   - **Play along:** the piano keys follow the song's chord. `;` `.` choose the rule: chord tones
     only, snapped to the chord, the scale that fits it, or any note.
-  - While it runs the screen drops to 8-bit colour (the next song needs the RAM) and returns to
-    full colour when you switch it off. It stops itself when you open a song or start a cloud job.
+  - **Speaker or MIDI, not both.** Building songs needs RAM, so Generated mode releases what the
+    way you are playing doesn't use, and gives it back when you switch it off: with a MIDI device
+    connected the built-in speaker is released (Bluetooth too, unless the device is on
+    Bluetooth); with nothing connected the speaker plays and Bluetooth is unloaded (so you can't
+    connect a Bluetooth device while it runs). The screen also drops to 8-bit colour. The screen
+    says what was switched off. It stops itself when you open a song or start a cloud job.
+  - Each genre needs a different amount of free RAM (Disco the most, about 61 KB, Ambient the
+    least, about 13 KB); the screen shows what the chosen genre needs if there isn't enough.
+    When there isn't room to build the next song beside the playing one, the playing song is
+    freed first and there is a short gap.
 - **Generate** (hold `` ` `` + `g`): endless songs made on the device by the same generator as
   trkr.one (the same seed makes the same song on both), in the genre you pick.
   - `,` `/` genre · `space` start / pause · `enter` a new song now · `del` switch it off.

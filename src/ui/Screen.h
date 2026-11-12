@@ -75,6 +75,8 @@ void goTo(Screen* s);
 void applyBtAuto();  // switch screens from inside a screen / panel
 void markDirty();
 bool isAdv();
-bool bleUnloadedForGenerate();  // Bluetooth is unloaded while Generated mode runs (RAM)
+// What Generated mode switched off to make room: the speaker when a MIDI device is
+// connected, Bluetooth when it is not ("" when nothing was).
+const char* genOutputNote();
 
 }  // namespace ui

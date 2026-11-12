@@ -34,13 +34,29 @@ int largestBlockKb() { return (int)(heap_caps_get_largest_free_block(MALLOC_CAP_
 //  - otherwise the playing song is freed first and the next is built in the
 //    space it leaves (a short gap between songs instead of a stall);
 //  - a build that runs low on memory stops cleanly instead of crashing.
-static constexpr uint32_t BUILD_FREE = 60000;     // to build a song when none is in memory
-static constexpr uint32_t PREFETCH_FREE = 96000;  // to build the next one while one plays
+// Peak memory (KB) of building a song, per genre, measured on a PC over many
+// seeds (test/host/genre_mem_test.cpp): the generator's own working memory plus the song.
+struct GenreCost { const char* id; uint8_t kb; };
+static const GenreCost GENRE_COST[] = {
+    {"disco", 61},       {"emo", 49},     {"city_pop", 48}, {"synth_pop", 44}, {"neo_soul", 42}, {"funk", 42},
+    {"electronica", 42}, {"pop", 40},     {"dnb", 36},      {"synthwave", 34}, {"bossa_nova", 33}, {"trap", 29},
+    {"house", 29},       {"reggae", 23},  {"lofi", 22},     {"boom_bap", 21},  {"ambient", 13},
+};
 static constexpr uint32_t GUARD_FREE = 20000;     // a build stops if free memory falls below this
 static constexpr uint32_t GUARD_BLOCK = 6000;     // ... or the largest free block below this
 static bool heapLow() {
   return esp_get_free_heap_size() < GUARD_FREE || heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) < GUARD_BLOCK;
 }
+
+// What a genre needs free before building starts: its measured peak with a little
+// extra for allocator overhead, plus the margin the build keeps in hand.
+static uint32_t genreNeedBytes(int g) {
+  uint32_t kb = 64;  // unknown genre: assume heavy
+  for (const auto& c : GENRE_COST)
+    if (strcmp(c.id, G(g).id) == 0) kb = c.kb;
+  return kb * 1024 * 112 / 100 + GUARD_FREE;
+}
+int needKb() { return (int)((genreNeedBytes(genre()) + 1023) / 1024); }
 
 static std::atomic<bool> abortReq{false}, producerAlive{false}, nextReady{false}, wantNext{false};
 static std::atomic<bool> rebuilding_{false};       // the playing song was freed; the next is being built (a gap)
@@ -98,6 +114,7 @@ class DeviceSink : public gen::Sink {
 };
 
 static void producer(void*) {
+  int lowTries = 0;
   while (!abortReq) {
     if (nextReady || !wantNext) {
       vTaskDelay(pdMS_TO_TICKS(40));
@@ -105,7 +122,7 @@ static void producer(void*) {
     }
     // A generated song is in memory and playing: the next one must fit beside it.
     const bool resident = st == State::Playing && !rebuilding_;
-    if (esp_get_free_heap_size() < (resident ? PREFETCH_FREE : BUILD_FREE)) {
+    if (esp_get_free_heap_size() < genreNeedBytes(genre())) {
       if (resident) prefetchBlocked_ = true;  // not an error: the next song is built when this one ends
       else lowMem = true;
       vTaskDelay(pdMS_TO_TICKS(300));
@@ -130,9 +147,12 @@ static void producer(void*) {
       nextGenre = g;
       nextSong = s;
       nextReady = true;
+      lowTries = 0;
     } else {
       delete s;
-      if (sink.ranLow) {  // ran short of memory part way: don't try again straight away
+      if (sink.ranLow && ++lowTries < 3) continue;  // another seed may be lighter: try again at once
+      if (sink.ranLow) {  // ran short of memory three times running: wait a moment
+        lowTries = 0;
         if (resident) prefetchBlocked_ = true;
         else lowMem = true;
         vTaskDelay(pdMS_TO_TICKS(800));
