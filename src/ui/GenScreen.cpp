@@ -75,12 +75,14 @@ class GenScreen : public Screen {
     const genmode::State st = genmode::state();
     if (genmode::lowMemory()) {
       c.setTextColor(col::DRUM);
-      snprintf(line, sizeof(line), "waiting for memory: %d KB free, need 66", genmode::freeHeapKb());
+      snprintf(line, sizeof(line), "waiting for memory: %d KB free, need 60", genmode::freeHeapKb());
     } else if (st == genmode::State::Idle) {
       c.setTextColor(col::DIM);
       snprintf(line, sizeof(line), "space = start   (%d KB free)", genmode::freeHeapKb());
     } else if (st == genmode::State::Generating) {
       snprintf(line, sizeof(line), "building the first song...");
+    } else if (genmode::rebuilding()) {
+      snprintf(line, sizeof(line), "building the next song...");
     } else {
       const gen::Meta& m = genmode::meta();
       snprintf(line, sizeof(line), "%u bpm   %s %s%s", seq::song.bpm, theory::noteName(m.key), theory::scaleName(m.scale),
@@ -109,6 +111,10 @@ class GenScreen : public Screen {
     c.setTextColor(col::DIM);
     snprintf(line, sizeof(line), "piano keys: %s", genmode::alongName(genmode::along()));
     c.drawString(line, 6, 53);
+    if (genmode::state() == genmode::State::Playing && genmode::prefetchBlocked()) {
+      c.setTextColor(col::DRUM);
+      c.drawString("low RAM: short gap between songs", 6, 64);
+    }
 
     // Parts
     if (st != genmode::State::Idle) {
