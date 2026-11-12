@@ -165,6 +165,23 @@ classic tracker layout: `q w e r t y u i o p [ ] \` are white keys (C up to A) a
     after a restart. **Disconnect** stops that until the next power-on.
   - Phones / computers can still connect to the Cardputer at the same time; MIDI goes to
     everything connected, and the BLE light shows green if anything is.
+- **Cloud** (hold `` ` `` + `w`): WiFi and [trkr.one](https://trkr.one) song sync.
+  - *WiFi:* choose a network from the scan (`space` rescans; "Other network" is for a hidden
+    one). WiFi and your login are kept in the settings file, so flashing doesn't erase them.
+  - *Sign in:* with your email and password, or "link with a code": type the shown code at
+    trkr.one/link while signed in. Only a token is kept, never your password.
+  - *Sync songs now:* songs you made on the website come down, songs made on the device go up
+    and the website title is kept. Change a song on one side and it follows; change it on
+    **both** and nothing is lost: your device copy goes up as a new song ("... (device)") and
+    the website's version comes down as a separate copy. A song you delete on the device stays
+    online and isn't fetched again unless it changes there. Songs with no notes aren't sent.
+  - Website songs are converted to the device's own format (scenes + arrangement). The device
+    keeps up to **24 patterns per track**; a song with more different bits of music on one track
+    than that is skipped and reported ("too big"). Swing, key, instrument names and track names
+    the device doesn't use are kept aside and sent back unchanged.
+  - A job frees RAM first: the speaker driver is released, the screen drops to 8-bit colour and
+    Bluetooth is unloaded; all of it comes back afterwards. `h` on the Cloud screen shows where
+    memory goes.
 - **Songs:** the saved songs, sorted by name, with the open one in yellow.
   `;`/`.` pick, `enter` loads, `s` saves the open song over the selected one, `del` deletes;
   each asks for a second press to confirm. `'` switches between the **FLASH** and

@@ -2,9 +2,14 @@
 
 #include "../app/Settings.h"
 #include "../midi/MidiOut.h"
+#include "../seq/Song.h"
+#include "SyncPlan.h"
+#include "TrkrConvert.h"
+#include "TrkrSong.h"
 
 #include <Arduino.h>
 #include <HTTPClient.h>
+#include <LittleFS.h>
 #include <NetworkClientSecure.h>
 #include <esp_heap_caps.h>
 #include <WiFi.h>
@@ -394,11 +399,288 @@ static bool doLogin() {
 }
 
 // ── sync ─────────────────────────────────────────────────────────────────────
-// Two-way song sync comes in the next step (it needs a converter between the
-// website's song format and this firmware's).
+// Songs are matched between the device and trkr.one by the website's song id,
+// kept in /cloud.idx (one line per song: name, id, version, checksum of the
+// device's file when it was last synced). What to do is decided by plan()
+// in SyncPlan.h, which is tested on a PC; this part carries it out.
+// A song that came from the website also has /songs/<name>.web with the few
+// things the device doesn't keep (swing, key, full track names, title), so a
+// song edited on the device goes back with them intact.
+static const char* IDX_PATH = "/cloud.idx";
+static const char* TMP_DOWN = "/cloud_dl.tmp";
+static const char* TMP_UP = "/cloud_up.tmp";
+
+static String cmsPath(const std::string& name) { return String("/songs/") + name.c_str() + ".cms"; }
+static String webPath(const std::string& name) { return String("/songs/") + name.c_str() + ".web"; }
+
+static uint32_t crc32File(const String& path) {
+  File f = LittleFS.open(path, "r");
+  if (!f) return 0;
+  uint32_t crc = 0xFFFFFFFFu;
+  uint8_t buf[256];
+  for (;;) {
+    int n = f.read(buf, sizeof(buf));
+    if (n <= 0) break;
+    for (int i = 0; i < n; i++) {
+      crc ^= buf[i];
+      for (int k = 0; k < 8; k++) crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
+    }
+  }
+  f.close();
+  return ~crc;
+}
+
+static std::vector<cloud::IdxEntry> loadIndex() {
+  std::vector<cloud::IdxEntry> v;
+  File f = LittleFS.open(IDX_PATH, "r");
+  if (!f) return v;
+  while (f.available()) {
+    String line = f.readStringUntil('\n');
+    line.trim();
+    int a = line.indexOf('\t'), b = line.indexOf('\t', a + 1), c = line.indexOf('\t', b + 1);
+    if (a < 0 || b < 0 || c < 0) continue;
+    cloud::IdxEntry e;
+    e.name = line.substring(0, a).c_str();
+    e.id = line.substring(a + 1, b).c_str();
+    e.version = (uint32_t)line.substring(b + 1, c).toInt();
+    e.crc = (uint32_t)strtoul(line.substring(c + 1).c_str(), nullptr, 16);
+    if (!e.id.empty()) v.push_back(e);
+  }
+  f.close();
+  return v;
+}
+
+static void saveIndex(const std::vector<cloud::IdxEntry>& v) {
+  File f = LittleFS.open("/cloud.tmp", "w");
+  if (!f) return;
+  for (const auto& e : v) f.printf("%s\t%s\t%u\t%08x\n", e.name.c_str(), e.id.c_str(), (unsigned)e.version, (unsigned)e.crc);
+  f.close();
+  LittleFS.remove(IDX_PATH);
+  LittleFS.rename("/cloud.tmp", IDX_PATH);
+}
+
+static void setEntry(std::vector<cloud::IdxEntry>& v, const cloud::IdxEntry& e) {
+  for (auto& x : v)
+    if (x.id == e.id) { x = e; return; }
+  v.push_back(e);
+}
+static void dropEntryByName(std::vector<cloud::IdxEntry>& v, const std::string& name) {
+  for (size_t i = 0; i < v.size(); i++)
+    if (v[i].name == name) { v.erase(v.begin() + i); return; }
+}
+
+static bool readMeta(const std::string& name, trkr::Meta& m) {
+  File f = LittleFS.open(webPath(name), "r");
+  if (!f) return false;
+  char buf[900];
+  size_t n = f.readBytes(buf, sizeof(buf) - 1);
+  f.close();
+  buf[n] = 0;
+  return trkr::metaFromText(buf, m);
+}
+
+// Fetches one website song, converts it and stores it as `a.name`.
+// Returns 1 = stored, 0 = the device can't hold it (*why says why), -1 = network problem.
+static int doDownload(const cloud::Action& a, cloud::IdxEntry& entry, const char** why) {
+  {
+    Http h;
+    if (!h.open(String("/api/songs/") + a.id.c_str() + "?format=trk", true)) return -1;
+    int rc = h.http.GET();
+    if (rc < 0) h.note(rc);
+    if (rc != 200) { h.http.end(); return -1; }
+    File f = LittleFS.open(TMP_DOWN, "w");
+    if (!f) { h.http.end(); return -1; }
+    int n = h.http.writeToStream(&f);  // copes with chunked responses
+    f.close();
+    h.http.end();
+    if (n < 0) { LittleFS.remove(TMP_DOWN); return -1; }
+  }  // the secure connection is closed (and its memory freed) before converting
+  trkr::Meta meta;
+  trkr::Song* ws = new trkr::Song();
+  File r = LittleFS.open(TMP_DOWN, "r");
+  bool ok = r && trkr::load(r, *ws, why);
+  if (r) r.close();
+  LittleFS.remove(TMP_DOWN);
+  if (!ok) { delete ws; return 0; }
+  seq::Song* ds = new seq::Song();
+  ok = trkr::toDevice(*ws, *ds, meta, why);
+  delete ws;
+  if (ok) ok = seq::songSaveCopy(a.name.c_str(), *ds);
+  delete ds;
+  if (!ok) { if (why && !*why) *why = "couldn't store it"; return 0; }
+  char mt[900];
+  trkr::metaToText(meta, mt, sizeof(mt));
+  File w = LittleFS.open(webPath(a.name), "w");
+  if (w) { w.print(mt); w.close(); }
+  entry = {a.name, a.id, a.version, crc32File(cmsPath(a.name))};
+  return 1;
+}
+
+// Sends a device song to the website: id empty = as a new song. Returns the
+// HTTP status (200/201 stored, 409 the website moved on, -1 couldn't send).
+static int doUpload(const std::string& name, const std::string& id, uint32_t version, bool deviceCopy, cloud::IdxEntry& entry,
+                    const char** why) {
+  {
+    seq::Song* ds = new seq::Song();
+    if (!seq::songLoadCopy(name.c_str(), *ds)) { delete ds; if (why) *why = "couldn't read it"; return -1; }
+    trkr::Meta meta;
+    bool have = readMeta(name, meta);
+    if (have && deviceCopy) strncat(meta.title, " (device)", sizeof(meta.title) - strlen(meta.title) - 1);
+    trkr::Song* ws = new trkr::Song();
+    bool ok = trkr::toWeb(*ds, have ? &meta : nullptr, name.c_str(), *ws, why);
+    delete ds;
+    if (!ok) { delete ws; return -1; }
+    File f = LittleFS.open(TMP_UP, "w");
+    if (!f) { delete ws; return -1; }
+    trkr::save(f, *ws);
+    f.close();
+    delete ws;
+  }  // converted and written: now open the secure connection
+  File f = LittleFS.open(TMP_UP, "r");
+  if (!f) return -1;
+  Http h;
+  const bool isNew = id.empty();
+  if (!h.open(isNew ? String("/api/songs") : String("/api/songs/") + id.c_str(), true)) { f.close(); return -1; }
+  h.http.addHeader("Content-Type", "text/plain");
+  if (!isNew) h.http.addHeader("If-Match", String(version));
+  int rc = h.http.sendRequest(isNew ? "POST" : "PUT", &f, f.size());
+  if (rc < 0) h.note(rc);
+  String body = h.http.getString();
+  h.http.end();
+  f.close();
+  LittleFS.remove(TMP_UP);
+  if (rc == 200 || rc == 201) {
+    entry = {name, kv(body, "id").c_str(), (uint32_t)kv(body, "version").toInt(), crc32File(cmsPath(name))};
+    if (entry.id.empty()) entry.id = id;
+  }
+  return rc;
+}
+
+// A song with no notes in it (main starts with an empty "untitled") isn't worth sending.
+static bool songIsEmpty(const std::string& name) {
+  seq::Song* s = new seq::Song();
+  bool empty = true;
+  if (seq::songLoadCopy(name.c_str(), *s)) {
+    for (const auto& tr : s->tracks)
+      for (const auto& p : tr.patterns)
+        if (!p.notes.empty()) empty = false;
+  }  // a song that can't be read can't be sent either, so it counts as empty
+  delete s;
+  return empty;
+}
+
 static bool doSync() {
-  setMsg("Song sync: next update");
-  return false;
+  nDown = nUp = 0;
+  uint16_t nSkipped = 0, nFailed = 0;
+  st = State::Syncing;
+  if (!seq::storageAvailable(seq::Storage::Flash)) { setMsg("Can't open song storage"); return false; }
+  setMsg("Checking songs...");
+
+  // 1. What the website has.
+  std::vector<cloud::RemoteSong> remote;
+  {
+    Http h;
+    if (!h.open("/api/songs?since=1970-01-01&format=tsv", true)) { setMsg("Can't reach server"); return false; }
+    int rc = h.http.GET();
+    if (rc < 0) h.note(rc);
+    if (rc == 401) {
+      h.http.end();
+      unlink();
+      setMsg("Unlinked on the website - sign in again");
+      return false;
+    }
+    if (rc != 200) {
+      h.http.end();
+      snprintf(msg, sizeof(msg), "Sync failed (HTTP %d)", rc);
+      return false;
+    }
+    String body = h.http.getString();
+    h.http.end();
+    int pos = 0;
+    while (pos < (int)body.length()) {
+      int nl = body.indexOf('\n', pos);
+      if (nl < 0) nl = body.length();
+      String line = body.substring(pos, nl);
+      pos = nl + 1;
+      int a = line.indexOf('\t'), b = line.indexOf('\t', a + 1), c = line.indexOf('\t', b + 1);
+      if (a < 0 || b < 0 || c < 0) continue;
+      cloud::RemoteSong r;
+      r.id = line.substring(0, a).c_str();
+      r.version = (uint32_t)line.substring(a + 1, b).toInt();
+      r.deleted = line.charAt(b + 1) == '1';
+      r.title = line.substring(c + 1).c_str();
+      remote.push_back(r);
+    }
+  }
+
+  // 2. What the device has, and what was synced last time.
+  std::vector<cloud::IdxEntry> idx = loadIndex();
+  std::vector<cloud::LocalSong> local;
+  for (const String& n : seq::songList(seq::Storage::Flash)) local.push_back({n.c_str(), crc32File(cmsPath(n.c_str()))});
+
+  // New songs with nothing in them stay on the device.
+  for (size_t i = 0; i < local.size();) {
+    bool known = false;
+    for (const auto& e : idx) known |= e.name == local[i].name;
+    if (!known && songIsEmpty(local[i].name)) local.erase(local.begin() + i);
+    else i++;
+  }
+
+  // 3. Carry out the plan.
+  const std::vector<cloud::Action> todo = cloud::plan(remote, idx, local);
+  std::vector<std::string> conflictNames;
+  for (const auto& a : todo)
+    if (a.act == cloud::Act::Detach && a.conflict) conflictNames.push_back(a.name);
+  for (const auto& a : todo) {
+    if (cancelReq) { saveIndex(idx); return false; }
+    cloud::IdxEntry e;
+    const char* why = nullptr;
+    switch (a.act) {
+      case cloud::Act::Download: {
+        snprintf(msg, sizeof(msg), "Downloading %.20s...", a.name.c_str());
+        int r = doDownload(a, e, &why);
+        if (r == 1) { setEntry(idx, e); nDown++; }
+        else if (r == 0) { setEntry(idx, {"", a.id, a.version, 0}); nSkipped++; }  // can't be held: don't retry until it changes
+        else nFailed++;
+        break;
+      }
+      case cloud::Act::Upload:
+      case cloud::Act::UploadNew: {
+        snprintf(msg, sizeof(msg), "Uploading %.22s...", a.name.c_str());
+        bool dc = false;
+        for (const auto& n : conflictNames) dc |= n == a.name;
+        int rc = doUpload(a.name, a.act == cloud::Act::Upload ? a.id : std::string(), a.version, dc, e, &why);
+        if (rc == 200 || rc == 201) { setEntry(idx, e); nUp++; }
+        else if (rc == 409 && a.act == cloud::Act::Upload) {
+          // The website moved on while we were syncing: keep ours as a new song online.
+          dropEntryByName(idx, a.name);
+          int r2 = doUpload(a.name, std::string(), 0, true, e, &why);
+          if (r2 == 200 || r2 == 201) { setEntry(idx, e); nUp++; } else nFailed++;
+        } else nFailed++;
+        break;
+      }
+      case cloud::Act::DropLocal:
+        LittleFS.remove(cmsPath(a.name));
+        LittleFS.remove(webPath(a.name));
+        dropEntryByName(idx, a.name);
+        break;
+      case cloud::Act::Detach:
+        dropEntryByName(idx, a.name);  // the device copy stays; it is sent up as a new song below
+        break;
+      case cloud::Act::Tombstone:
+        setEntry(idx, {"", a.id, a.version, 0});
+        LittleFS.remove(webPath(a.name));
+        break;
+    }
+    saveIndex(idx);  // after every step, so an interrupted sync loses nothing
+  }
+  saveIndex(idx);
+  syncedAt = millis();
+  if (nFailed) snprintf(msg, sizeof(msg), "Synced %u down, %u up, %u failed", nDown, nUp, nFailed);
+  else if (nSkipped) snprintf(msg, sizeof(msg), "Synced %u down, %u up, %u too big", nDown, nUp, nSkipped);
+  else if (!nDown && !nUp) setMsg("Everything is up to date");
+  else snprintf(msg, sizeof(msg), "Synced: %u down, %u up", nDown, nUp);
+  return nFailed == 0;
 }
 
 static void worker(void*) {
