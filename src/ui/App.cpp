@@ -104,6 +104,7 @@ static void toggleBle() {
   midi::setBleEnabled(settings.bleMidi);
   applyBtAuto();
   toast(settings.bleMidi ? "Bluetooth MIDI on" : "Bluetooth MIDI off");
+  bleSettingChanged();
 }
 
 // Notices connections made / lost / failed on the Connect screen (or by
@@ -492,6 +493,29 @@ static void bleUnloadTask(void*) {
 }
 const char* genOutputNote() { return genNote; }
 
+// Bluetooth MIDI was switched on while Generated mode runs with Bluetooth unloaded
+// (to make room): there is no stack to switch on. Restart Generated mode, which decides
+// again with Bluetooth wanted: Bluetooth stays loaded and the speaker is released instead.
+// (Reloading Bluetooth in the middle of a song build could run out of memory.)
+void bleSettingChanged() {
+  if (!genmode::running() || !settings.bleMidi || genBle == 0 || jobMode) return;
+  for (int i = 0; i < 200 && genBle == 1; i++) vTaskDelay(pdMS_TO_TICKS(10));  // an unload still in progress
+  if (genBle != 2) return;
+  genmode::stop();
+  if (genSynthOff) {
+    synth::resume();
+    genSynthOff = false;
+  }
+  midi::resumeBle();
+  midi::setBleEnabled(settings.bleMidi);  // it comes back in the state it was unloaded in: apply the setting
+  applyBtAuto();
+  genBle = 0;
+  genLatched = false;  // the next tick decides again, with Bluetooth wanted
+  genNote[0] = 0;
+  genmode::start();
+  toast("Bluetooth on: restarting Generated mode");
+}
+
 static void genColorTick() {
   if (jobMode) return;  // a cloud job decides the colour depth, the speaker and Bluetooth
   const bool want = genmode::running();
@@ -500,17 +524,21 @@ static void genColorTick() {
   if (want && !genLatched) {  // Generated mode just started: decide what to switch off
     genLatched = true;
     genStoppedAt = 0;
-    const bool bleConn = midi::bleState() == midi::LinkState::Connected;
-    const bool midiConn = bleConn || midi::usbState() == midi::LinkState::Connected;
-    genSynthOff = midiConn || !settings.speaker;
+    // Bluetooth stays if it is switched on (even if nothing has connected yet) or connected:
+    // that is how the songs get to a better-sounding device.
+    const bool bleKeep = settings.bleMidi || midi::bleState() == midi::LinkState::Connected;
+    const bool usbConn = midi::usbState() == midi::LinkState::Connected;
+    const bool midiOut = bleKeep || usbConn;
+    genSynthOff = midiOut || !settings.speaker;
     if (genSynthOff) synth::pause();
-    if (!bleConn && genBle == 0) {
+    if (!bleKeep && genBle == 0) {
       genBle = 1;
       if (xTaskCreatePinnedToCore(bleUnloadTask, "bleoff", 8192, nullptr, 1, nullptr, 0) != pdPASS) genBle = 0;
     }
-    snprintf(genNote, sizeof(genNote), "%s", midiConn ? (bleConn ? "MIDI out: speaker off" : "MIDI out: speaker, Bluetooth off")
-                                                       : "speaker: Bluetooth off");
-    if (!midiConn && !settings.speaker) snprintf(genNote, sizeof(genNote), "no sound: speaker and MIDI off");
+    if (bleKeep) snprintf(genNote, sizeof(genNote), "MIDI out: speaker off");
+    else if (usbConn) snprintf(genNote, sizeof(genNote), "USB MIDI: speaker, Bluetooth off");
+    else if (settings.speaker) snprintf(genNote, sizeof(genNote), "speaker: Bluetooth off (fn+b = MIDI)");
+    else snprintf(genNote, sizeof(genNote), "no sound: speaker and MIDI off");
   } else if (!want && genLatched) {  // switched off: give things back
     if (genSynthOff) synth::resume();
     genSynthOff = false;
@@ -523,6 +551,8 @@ static void genColorTick() {
     if (!genStoppedAt) genStoppedAt = millis();
     if (!lowColor || millis() - genStoppedAt > 8000) {
       midi::resumeBle();
+      midi::setBleEnabled(settings.bleMidi);  // (as above: the setting may have changed meanwhile)
+      applyBtAuto();
       genBle = 0;
       genStoppedAt = 0;
     }
