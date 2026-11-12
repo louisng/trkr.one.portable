@@ -75,7 +75,7 @@ class GenScreen : public Screen {
     const genmode::State st = genmode::state();
     if (genmode::lowMemory()) {
       c.setTextColor(col::DRUM);
-      snprintf(line, sizeof(line), "waiting for memory: %d KB free, need 60", genmode::freeHeapKb());
+      snprintf(line, sizeof(line), "low memory: %d KB free (blk %d), need ~75", genmode::freeHeapKb(), genmode::largestBlockKb());
     } else if (st == genmode::State::Idle) {
       c.setTextColor(col::DIM);
       snprintf(line, sizeof(line), "space = start   (%d KB free)", genmode::freeHeapKb());
@@ -138,7 +138,7 @@ class GenScreen : public Screen {
 
     if (st != genmode::State::Idle) {
       c.setTextColor(col::FAINT);
-      snprintf(line, sizeof(line), "%d KB free", genmode::freeHeapKb());
+      snprintf(line, sizeof(line), "%d KB free (blk %d)", genmode::freeHeapKb(), genmode::largestBlockKb());
       c.setTextDatum(top_right);
       c.drawString(line, W - 4, 53);
       c.setTextDatum(top_left);
@@ -150,7 +150,10 @@ class GenScreen : public Screen {
 
  private:
   static void toggle() {
-    if (!genmode::running()) genmode::start();
+    if (!genmode::running()) {
+      toast("Replaces the open song (unsaved changes are lost)");
+      genmode::start();
+    }
     else if (seq::playing()) seq::stop();
     else seq::play();
   }

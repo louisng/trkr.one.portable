@@ -474,10 +474,20 @@ static void setLowColor(bool on) {
 
 // Generated mode builds the next song while one plays: that needs the RAM the
 // 16-bit screen buffer holds, so the screen runs in 8-bit colour meanwhile.
+static bool genSynthPaused = false;
 static void genColorTick() {
-  if (jobMode) return;  // a cloud job decides the colour depth
+  if (jobMode) return;  // a cloud job decides the colour depth and the speaker
   const bool want = genmode::running();
   if (want != lowColor && (int32_t)(millis() - colorRetryAt) >= 0) setLowColor(want);
+  // With the built-in sound off (MIDI only) its speaker driver isn't needed: ~18 KB back.
+  const bool synthOff = want && !settings.speaker;
+  if (synthOff && !genSynthPaused) {
+    synth::pause();
+    genSynthPaused = true;
+  } else if (!synthOff && genSynthPaused) {
+    synth::resume();
+    genSynthPaused = false;
+  }
 }
 
 static void cloudMemoryTick() {

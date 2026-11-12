@@ -26,6 +26,7 @@ void setGenre(int idx) {
   if (st != State::Idle) invalidateNext();  // the song already built was for the old genre
 }
 int freeHeapKb() { return (int)(esp_get_free_heap_size() / 1024); }
+int largestBlockKb() { return (int)(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) / 1024); }
 
 // Memory policy. The generator needs ~37 KB while it works and a song holds up
 // to ~27 KB of notes, so:
@@ -180,12 +181,24 @@ static void applyNext() {
   seq::songForgetName();  // a generated song isn't any saved file: saving it must ask for a name
 }
 
+// songInitInto() empties the note lists but a cleared std::vector keeps its
+// memory, so freeing a song needs this: swap each list with an empty one.
+static void releaseSongMemory(seq::Song& s) {
+  for (auto& tr : s.tracks)
+    for (auto& p : tr.patterns) {
+      std::vector<seq::NoteEvent>().swap(p.notes);
+      std::vector<seq::StepFx>().swap(p.fx);
+    }
+}
+
 // No room to build the next song beside this one: stop, free this one, and let
 // the next be built in the space it leaves (engine lock held).
 static void beginRebuild() {
   snapshotCarry();
   seq::stop();
   seq::songInitInto(seq::song);
+  releaseSongMemory(seq::song);
+  curMeta = gen::Meta();  // its chord list goes too
   seq::songForgetName();
   rebuilding_ = true;
   prefetchBlocked_ = false;
@@ -244,6 +257,15 @@ void start() {
   rebuilding_ = false;
   prefetchBlocked_ = false;
   skipPending = false;
+  {
+    // Generated mode replaces the open song anyway: let go of its memory now,
+    // so a big song doesn't leave too little room to build the first one.
+    seq::Lock l;
+    seq::stop();
+    seq::songInitInto(seq::song);
+    releaseSongMemory(seq::song);
+    seq::songForgetName();
+  }
   producerAlive = true;
   if (xTaskCreatePinnedToCore(producer, "gen", 12288, nullptr, 1, nullptr, 0) != pdPASS) {
     producerAlive = false;
