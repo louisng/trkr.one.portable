@@ -67,7 +67,10 @@ static void savePref(const char* key, const char* val) {
   p.end();
 }
 
-void begin() { loadPrefs(); }
+void begin() {
+  strcpy(cfgHost, DEFAULT_HOST);  // before loading: a fresh device has no saved settings at all
+  loadPrefs();
+}
 State state() { return st; }
 const char* message() { return msg; }
 const char* detail() { return detailBuf; }
@@ -171,7 +174,10 @@ const char* sdMessage() { return sdMsg; }
 static bool sdOpen() {
   SPI.begin(40, 39, 14, 12);  // Cardputer SD slot: SCK MISO MOSI CS
   if (SD.begin(12, SPI, 20000000)) return true;
-  strcpy(sdMsg, "No SD card found");
+  SD.end();
+  if (SD.begin(12, SPI, 4000000)) return true;  // some cards need a gentler clock
+  SD.end();
+  strcpy(sdMsg, "No SD card (FAT32?)");
   return false;
 }
 
@@ -660,6 +666,7 @@ static void worker(void*) {
 
 static void start(Job j) {
   if (task) return;
+  if (!cfgHost[0]) strcpy(cfgHost, DEFAULT_HOST);
   job = j;
   cancelReq = false;
   detailBuf[0] = 0;
