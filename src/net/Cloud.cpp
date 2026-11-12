@@ -253,6 +253,23 @@ static void wifiDown() {
   WiFi.mode(WIFI_OFF);
 }
 
+// A secure connection checks the server's certificate dates against the clock,
+// and this device has none until it asks the internet. Without this, every
+// HTTPS request fails ("not yet valid") with HTTP -1.
+static bool syncClock() {
+  if (time(nullptr) > 1700000000) return true;  // already set
+  setMsg("Setting the clock...");
+  configTime(0, 0, "pool.ntp.org", "time.cloudflare.com", "time.google.com");
+  for (uint32_t t0 = millis(); millis() - t0 < 12000;) {
+    if (cancelReq) return false;
+    if (time(nullptr) > 1700000000) return true;
+    delay(100);
+  }
+  setMsg("No internet time (NTP)");
+  snprintf(detailBuf, sizeof(detailBuf), "can't reach a time server");
+  return false;
+}
+
 struct Http {
   NetworkClientSecure tls;
   HTTPClient http;
@@ -260,6 +277,12 @@ struct Http {
     tls.setCACertBundle(x509_crt_bundle_start, x509_crt_bundle_end - x509_crt_bundle_start);
     http.setReuse(false);
     http.setTimeout(15000);
+  }
+  // After a failed request: say why (the library's own TLS error text).
+  void note(int rc) {
+    char eb[96] = "";
+    int e = tls.lastError(eb, sizeof(eb));
+    snprintf(detailBuf, sizeof(detailBuf), "http %d tls %d %.36s", rc, e, eb);
   }
   bool open(const String& path, bool auth) {
     String u = String("https://") + cfgHost + path;
@@ -293,6 +316,7 @@ static bool doLink() {
     if (!h.open("/api/devices/code", false)) { setMsg("Can't reach server"); return false; }
     h.http.addHeader("Content-Type", "application/x-www-form-urlencoded");
     int rc = h.http.POST("label=Cardputer");
+    if (rc < 0) h.note(rc);
     String body = h.http.getString();
     h.http.end();
     if (rc != 200) { snprintf(msg, sizeof(msg), "Link failed (HTTP %d)", rc); return false; }
@@ -313,6 +337,7 @@ static bool doLink() {
     if (!h.open("/api/devices/token", false)) continue;
     h.http.addHeader("Content-Type", "application/x-www-form-urlencoded");
     int rc = h.http.POST(String("device_code=") + deviceCode);
+    if (rc < 0) h.note(rc);
     String body = h.http.getString();
     h.http.end();
     if (rc == 200) {
@@ -351,6 +376,7 @@ static bool doLogin() {
   String body = String("email=") + urlEncode(loginEmail) + "&password=" + urlEncode(loginPass) + "&label=Cardputer";
   memset(loginPass, 0, sizeof(loginPass));
   int rc = h.http.POST(body);
+  if (rc < 0) h.note(rc);
   body = "";
   String resp = h.http.getString();
   h.http.end();
@@ -379,6 +405,7 @@ static bool download(const String& id, store::Entry& e) {
   Http h;
   if (!h.open("/api/songs/" + id + "?format=trk", true)) return false;
   int rc = h.http.GET();
+  if (rc < 0) h.note(rc);
   if (rc != 200) { h.http.end(); return false; }
   // writeToStream copes with chunked responses; save to a temp file first,
   // then the store validates it before replacing anything.
@@ -426,6 +453,7 @@ static bool doSync() {
     Http h;
     if (!h.open("/api/songs?since=1970-01-01&format=tsv", true)) { setMsg("Can't reach server"); return false; }
     int rc = h.http.GET();
+    if (rc < 0) h.note(rc);
     if (rc == 401) {
       h.http.end();
       unlink();
@@ -511,7 +539,7 @@ static void worker(void*) {
   midi::pauseBle();
   bleFreedKb = (uint16_t)((esp_get_free_heap_size() - before) / 1024);
   if (!hasWifi()) setMsg("Set up WiFi first");
-  else if (wifiUp()) {
+  else if (wifiUp() && syncClock()) {
     if (job == Job::Link) ok = doLink();
     else if (job == Job::Login) ok = doLogin();
     else if (!linked()) setMsg("Link your account first");
