@@ -7,6 +7,7 @@
 namespace blemidi {
 
 void begin(const char* deviceName);  // initialises the stack, does not advertise
+void shutdown();                     // unload the whole stack (frees RAM); begin() brings it back
 void setEnabled(bool on);            // start/stop advertising, drop connections
 bool enabled();
 bool connected();

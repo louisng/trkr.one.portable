@@ -68,6 +68,16 @@ void begin(const char* deviceName) {
   adv->enableScanResponse(true);
 }
 
+void shutdown() {
+  if (!server) return;
+  isEnabled = false;  // the sending side checks these first
+  subscribed = false;
+  pktLen = 0;
+  server = nullptr;
+  midiChar = nullptr;
+  NimBLEDevice::deinit(true);
+}
+
 void setEnabled(bool on) {
   if (!server) return;
   isEnabled = on;

@@ -34,6 +34,26 @@ void setBleEnabled(bool on) {
   blemidi::setEnabled(on);
 }
 
+static bool blePaused = false, bleWasOn = false;
+
+void pauseBle() {
+  if (blePaused) return;
+  bleWasOn = blemidi::enabled();
+  if (blemidi::connected()) {
+    for (uint8_t ch = 0; ch < 16; ch++) blemidi::send(0xB0 | ch, 123, 0);
+    blemidi::flush();
+  }
+  blemidi::shutdown();
+  blePaused = true;
+}
+
+void resumeBle() {
+  if (!blePaused) return;
+  blePaused = false;
+  blemidi::begin("Cardputer MIDI");
+  blemidi::setEnabled(bleWasOn);
+}
+
 void setUsbEnabled(bool on) {
   if (!on && usbOn && usbMounted()) {
     for (uint8_t ch = 1; ch <= 16; ch++) usbMidi.controlChange(123, 0, ch);

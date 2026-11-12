@@ -1,5 +1,7 @@
 #include "Cloud.h"
 
+#include "../midi/MidiOut.h"
+
 #include <Arduino.h>
 #include <HTTPClient.h>
 #include <LittleFS.h>
@@ -25,6 +27,7 @@ static const char* DEFAULT_HOST = "trkr.one";
 static volatile State st = State::Idle;
 static char msg[64] = "";
 static char detailBuf[64] = "";
+static uint16_t bleFreedKb = 0;
 static char code[16] = "";
 static char url[48] = "";
 static char cfgSsid[33] = "", cfgPass[65] = "", cfgToken[64] = "", cfgEmail[64] = "", cfgHost[40] = "";
@@ -65,6 +68,7 @@ void begin() { loadPrefs(); }
 State state() { return st; }
 const char* message() { return msg; }
 const char* detail() { return detailBuf; }
+int bleFreedLastKb() { return bleFreedKb; }
 const char* linkCode() { return code; }
 const char* linkUrl() { return url; }
 bool hasWifi() { return cfgSsid[0] != 0; }
@@ -496,6 +500,11 @@ static bool doSync() {
 
 static void worker(void*) {
   bool ok = false;
+  // WiFi and the secure connection need a lot of RAM; Bluetooth holds ~50 KB
+  // even when switched off, so unload it for the duration of the job.
+  uint32_t before = esp_get_free_heap_size();
+  midi::pauseBle();
+  bleFreedKb = (uint16_t)((esp_get_free_heap_size() - before) / 1024);
   if (!hasWifi()) setMsg("Set up WiFi first");
   else if (wifiUp()) {
     if (job == Job::Link) ok = doLink();
@@ -506,6 +515,7 @@ static void worker(void*) {
   if (cancelReq) setMsg("Cancelled");
   memset(loginPass, 0, sizeof(loginPass));
   wifiDown();
+  midi::resumeBle();
   st = ok ? State::Done : State::Failed;
   task = nullptr;
   vTaskDelete(nullptr);

@@ -25,6 +25,10 @@ LinkState usbState();
 void noteOn(uint8_t channel, uint8_t note, uint8_t velocity);
 void noteOff(uint8_t channel, uint8_t note);
 void controlChange(uint8_t channel, uint8_t cc, uint8_t value);
+// Unload / reload the Bluetooth stack to free RAM for WiFi. resume() restores
+// whatever on/off state Bluetooth MIDI had.
+void pauseBle();
+void resumeBle();
 void allNotesOff();  // CC123 on every channel, on every enabled transport
 
 // Counters for the status display.

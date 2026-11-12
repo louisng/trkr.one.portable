@@ -234,7 +234,16 @@ class CloudScreen : public Screen {
     static const char* names[11] = {"", "start", "M5 + display", "rotate", "settings", "speaker synth",
                                     "midi (BLE+USB)", "keys", "files + cloud", "sequencer + gen", "screen buffer"};
     c.setTextColor(col::ACCENT);
-    c.drawString("free KB after each start step", 6, 16);
+    c.drawString("free KB at each start step", 6, 16);
+    if (cloud::bleFreedLastKb()) {
+      char bf[24];
+      snprintf(bf, sizeof(bf), "BLE off:+%dk", cloud::bleFreedLastKb());
+      c.setTextDatum(top_right);
+      c.setTextColor(col::OK);
+      c.drawString(bf, W - 4, 16);
+      c.setTextDatum(top_left);
+      c.setTextColor(col::TEXT);
+    }
     c.setTextColor(col::TEXT);
     char line[48];
     for (int i = 1; i <= 10; i++) {
