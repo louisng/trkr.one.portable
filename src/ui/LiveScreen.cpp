@@ -6,8 +6,7 @@
 #include "../input/KeyLayout.h"
 #include "../music/Theory.h"
 #include "../play/LivePlayer.h"
-#include "../play/GenMode.h"
-#include "../play/Sequencer.h"
+#include "../seq/Engine.h"
 #include "Screen.h"
 
 namespace ui {
@@ -16,7 +15,7 @@ using layout::Role;
 
 // Draw the 4 x 14 key map with each key's current function. Shared with the
 // key-test screen (which shows key caps instead of functions).
-void drawKeyMap(M5Canvas& c, int top, bool showCaps, bool filtered) {
+void drawKeyMap(M5Canvas& c, int top, bool showCaps) {
   const int cw = 17, ch = 15, x0 = (W - cw * layout::COLS) / 2;
   c.setFont(&fonts::TomThumb);
   c.setTextDatum(middle_center);
@@ -39,17 +38,13 @@ void drawKeyMap(M5Canvas& c, int top, bool showCaps, bool filtered) {
                    theory::chordButtonLabel(settings.scale, def.value));
           break;
         case Role::Piano: {
-          bool black = (def.value == 1 || def.value == 3 || def.value == 6 ||
-                        def.value == 8 || def.value == 10);
+          const uint8_t pc = def.value % 12;
+          bool black = (pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10);
           bg = black ? col::BLACK_KEY : col::WHITE_KEY;
           fg = black ? col::TEXT : TFT_BLACK;
           int n = player::pianoNoteFor(def.value);
           if (n >= 0) snprintf(label, sizeof(label), "%s", theory::noteName(n % 12));
           else bg = col::FAINT;
-          if (filtered && n >= 0 && genmode::noteBlocked(n)) {
-            bg = col::FAINT;
-            fg = col::DIM;
-          }
           break;
         }
         case Role::Action:
@@ -80,26 +75,16 @@ class LiveScreen : public Screen {
   void onAction(uint8_t a) override {
     switch (a) {
       case layout::ACT_UP:
-        settings.velocity = settings.velocity >= 117 ? 127 : settings.velocity + 10;
+        seq::selectTrack((seq::selectedTrack() + seq::TRACKS - 1) % seq::TRACKS);
         break;
       case layout::ACT_DOWN:
-        settings.velocity = settings.velocity <= 11 ? 1 : settings.velocity - 10;
+        seq::selectTrack((seq::selectedTrack() + 1) % seq::TRACKS);
         break;
       case layout::ACT_LEFT:
-        settings.root = (settings.root + 11) % 12;
+        settings.velocity = settings.velocity <= 11 ? 1 : settings.velocity - 10;
         break;
       case layout::ACT_RIGHT:
-        settings.root = (settings.root + 1) % 12;
-        break;
-      case layout::ACT_PLAY:
-        // Play / stop the song loaded on the Songs screen, to jam along.
-        if (genmode::running()) genmode::toggle();
-        else if (!seq::loaded()) toast("Load a song first (hold ` > 4)");
-        else if (seq::playing()) seq::stop();
-        else seq::play(0);
-        break;
-      case layout::ACT_ENTER:
-        toast("Recording comes with the step sequencer");
+        settings.velocity = settings.velocity >= 117 ? 127 : settings.velocity + 10;
         break;
       default:
         break;
@@ -127,9 +112,10 @@ class LiveScreen : public Screen {
 
     c.setTextDatum(top_left);
     c.setTextColor(col::DIM);
-    snprintf(buf, sizeof(buf), "piano %s  ch P%d C%d D%d",
-             settings.pianoScaleMode ? "scale" : "chrom", settings.pianoCh, settings.chordCh,
-             settings.drumCh);
+    const auto& st = seq::song.tracks[seq::liveSynthTrack()];
+    const auto& dt = seq::song.tracks[seq::liveDrumTrack()];
+    snprintf(buf, sizeof(buf), "keys>%d %s ch%d  drums>%d %s ch%d", seq::liveSynthTrack() + 1,
+             st.name, st.channel, seq::liveDrumTrack() + 1, dt.name, dt.channel);
     c.drawString(buf, 8, 48);
 
     drawKeyMap(c, 62, false);

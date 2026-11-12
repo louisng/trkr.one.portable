@@ -2,6 +2,8 @@
 #include <M5Cardputer.h>
 #include <stdint.h>
 
+#include "../play/LivePlayer.h"
+
 namespace ui {
 
 static constexpr int W = 240;
@@ -30,35 +32,42 @@ class Screen {
  public:
   virtual ~Screen() = default;
   virtual const char* title() const = 0;
-  // Whether piano / chord / drum keys play notes while this screen is open.
+  // Whether piano / chord / drum keys play notes while this screen is open
+  // (and enter arms recording).
   virtual bool musicKeys() const { return true; }
+  // Whether space plays / stops on this screen.
+  virtual bool spaceIsPlay() const { return true; }
   virtual void onEnter() {}
   virtual void onLeave() {}
   // Action keys (arrows, enter, del, space) -- presses only.
   virtual void onAction(uint8_t action) {}
+  // A musical key was played (not while live recording). Used for step entry.
+  virtual void onPlayed(uint8_t key, const player::Played& p) {}
   // Every raw key event, before anything else handles it.
   virtual void onRawKey(uint8_t index, bool pressed) {}
-  // Return true to take a key for yourself (it then doesn't play a note).
-  // Called for presses and releases; take both halves of a key you took.
-  virtual bool consumeKey(uint8_t index, bool pressed) { return false; }
-  // Called every loop, to ask for a redraw when something on screen changed.
-  virtual void tick() {}
   virtual void draw(M5Canvas& c) = 0;
+  // True while the screen needs periodic redraws (blinking cursor etc.).
+  virtual bool animating() const { return false; }
 };
 
 Screen* liveScreen();
+Screen* stepScreen();
+Screen* trackerScreen();
+Screen* songsScreen();
+Screen* scenesScreen();
+Screen* arrangeScreen();
+Screen* synthScreen();
+Screen* drumMidiScreen();
+Screen* connectScreen();
+void songsStartSaveAs();  // call before switching to songsScreen()
 Screen* setupScreen();
 Screen* keyTestScreen();
-Screen* genScreen();
-
-// The 4 x 14 key map (LiveScreen.cpp). `filtered` greys out piano keys that
-// the play-along filter would silence.
-void drawKeyMap(M5Canvas& c, int top, bool showCaps, bool filtered = false);
-Screen* songsScreen();
-Screen* cloudScreen();
 
 // Shared helpers (App.cpp)
 void toast(const char* msg);
+void goTo(Screen* s);
+// Start / stop reconnecting to the remembered Bluetooth device per settings.
+void applyBtAuto();  // switch screens from inside a screen / panel
 void markDirty();
 bool isAdv();
 

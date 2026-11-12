@@ -7,20 +7,25 @@ struct Settings {
   bool usbMidi = true;
   bool speaker = true;     // play a simple preview tone on the built-in speaker
   uint8_t volume = 96;     // speaker volume 0-255
-  uint8_t pianoCh = 1;     // MIDI channels 1-16
-  uint8_t chordCh = 2;
-  uint8_t drumCh = 10;
   uint8_t velocity = 100;
   uint8_t root = 0;        // key root pitch class, 0 = C
   uint8_t scale = 0;       // theory::SCALE index
   bool pianoScaleMode = false;  // false: chromatic piano; true: white keys = scale degrees
   int8_t octave = 4;       // piano octave (C4 = 60); chords play one octave lower
-  // Generated mode
-  uint8_t genGenre = 0;    // selected genre (index into gen::GENRE_LIST)
-  uint8_t genAlong = 1;    // play-along mode: 0 free, 1 chord tones, 2 snap to chord, 3 scale
-  uint16_t genMuted = 0;   // bit n = generated track n is muted (kept between songs)
-  // MIDI channel of each generated part: kick snare hats perc bass keys lead pad/arp
-  uint8_t genCh[8] = {10, 10, 10, 10, 3, 2, 1, 4};
+  uint8_t metronome = 1;   // 0 off, 1 while recording, 2 always
+  bool quantize = true;    // snap live-recorded notes to steps
+  bool upperPiano = false; // top two rows = second piano octave (fn+p)
+  char lastSong[17] = "";  // song loaded at power-on
+  bool clockOut = true;    // send MIDI clock + start/stop while playing
+  bool lastSongOnSd = false;  // lastSong lives on the SD card
+  // Bluetooth MIDI device we connect out to (Connect screen), reconnected
+  // automatically while btAuto is on.
+  char btAddr[18] = "";
+  char btName[24] = "";
+  uint8_t btAddrType = 0;
+  bool btAuto = true;
+  // New fields go at the end: older saved settings still load (the new
+  // fields keep their defaults).
 };
 
 extern Settings settings;

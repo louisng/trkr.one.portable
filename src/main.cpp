@@ -1,198 +1,93 @@
 // Cardputer MIDI Controller / Sequencer
 // Runs on both M5Stack Cardputer and Cardputer ADV (board detected at boot).
 #include <M5Cardputer.h>
-#include <esp_attr.h>
-#include <esp_core_dump.h>
-#include <esp_system.h>
 
+#include "app/BootGuard.h"
 #include "app/Settings.h"
-#include "audio/Monitor.h"
+#include "audio/Synth.h"
 #include "input/KeyInput.h"
 #include "midi/MidiOut.h"
-#include "play/GenMode.h"
-#include "net/Cloud.h"
-#include "play/Sequencer.h"
-#include "song/SongStore.h"
 #include "play/LivePlayer.h"
+#include "seq/Engine.h"
 #include "ui/Ui.h"
 
-// ── boot diagnostics ─────────────────────────────────────────────────────────
-// The chip's crash messages don't reach the USB port, so each boot step is
-// written to memory that survives a reset. If the last boot ended in a crash,
-// watchdog or brownout, the next boot shows how far it got and why, on screen.
-static constexpr uint32_t RTC_MAGIC = 0xB007D1A6;
-RTC_NOINIT_ATTR static uint32_t rtcMagic;
-RTC_NOINIT_ATTR static uint32_t rtcStage;
-RTC_NOINIT_ATTR static uint32_t rtcBoots;
-// Free memory after each start-up step (read on the Cloud screen: press h).
-uint32_t g_bootHeap[11] = {0};
-static inline void stage(uint32_t n) {
-  rtcStage = n;
-  if (n <= 10) g_bootHeap[n] = esp_get_free_heap_size();
-}
+using namespace bootguard;
 
-static const char* const STAGE_NAMES[] = {
-    "(none)",
-    "M5 init: display/speaker/keys",
-    "after M5 init",
-    "settings load",
-    "speaker synth",
-    "MIDI: USB + Bluetooth",
-    "keys + player",
-    "storage + WiFi",
-    "sequencer + generator",
-    "screens setup",
-    "setup finished",
-    "loop: sequencer",
-    "loop: screens + keys",
-    "loop: MIDI",
-};
-
-static const char* resetName(esp_reset_reason_t r) {
-  switch (r) {
-    case ESP_RST_POWERON: return "power on";
-    case ESP_RST_EXT: return "external reset";
-    case ESP_RST_SW: return "software restart";
-    case ESP_RST_PANIC: return "CRASH (panic)";
-    case ESP_RST_INT_WDT: return "interrupt watchdog";
-    case ESP_RST_TASK_WDT: return "task watchdog";
-    case ESP_RST_WDT: return "watchdog";
-    case ESP_RST_DEEPSLEEP: return "deep sleep";
-    case ESP_RST_BROWNOUT: return "BROWNOUT (power dip)";
-    case ESP_RST_USB: return "usb";
-    default: return "other";
-  }
-}
-
-static void showBootProblem(esp_reset_reason_t why, uint32_t died, uint32_t boots) {
-  auto& d = M5Cardputer.Display;
-  d.fillScreen(TFT_BLACK);
-  d.setFont(&fonts::Font0);
-  d.setTextSize(1);
-  d.setTextColor(TFT_YELLOW);
-  d.setCursor(4, 4);
-  d.println("BOOT PROBLEM (last start failed)");
-  d.setTextColor(TFT_WHITE);
-  d.setCursor(4, 20);
-  d.printf("why:   %s\n", resetName(why));
-  d.setCursor(4, 32);
-  d.printf("stage: %u  %s\n", (unsigned)died, died < sizeof(STAGE_NAMES) / sizeof(STAGE_NAMES[0]) ? STAGE_NAMES[died] : "?");
-  d.setCursor(4, 44);
-  d.printf("boots: %u   free heap: %u\n", (unsigned)boots, (unsigned)esp_get_free_heap_size());
-  d.setCursor(4, 56);
-  d.printf("board: %s\n", M5.getBoard() == m5::board_t::board_M5CardputerADV ? "Cardputer ADV" : "Cardputer");
-  // The chip saved a report of the crash in flash: show where it happened.
-  d.setTextColor(TFT_GREEN);
-  auto* sum = (esp_core_dump_summary_t*)malloc(sizeof(esp_core_dump_summary_t));
-  if (sum && esp_core_dump_image_check() == ESP_OK && esp_core_dump_get_summary(sum) == ESP_OK) {
-    d.setCursor(4, 68);
-    d.printf("task: %.16s\n", sum->exc_task);
-    d.setCursor(4, 78);
-    d.printf("pc: %08x  cause: %u\n", (unsigned)sum->exc_pc, (unsigned)sum->ex_info.exc_cause);
-    d.setCursor(4, 88);
-    d.printf("addr: %08x  depth: %u\n", (unsigned)sum->ex_info.exc_vaddr, (unsigned)sum->exc_bt_info.depth);
-    uint32_t n = sum->exc_bt_info.depth < 16 ? sum->exc_bt_info.depth : 16;
-    Serial.printf("CRASH task=%.16s pc=%08x cause=%u vaddr=%08x\n", sum->exc_task, (unsigned)sum->exc_pc,
-                  (unsigned)sum->ex_info.exc_cause, (unsigned)sum->ex_info.exc_vaddr);
-    for (uint32_t i = 0; i < n && i < 9; i++) {
-      d.setCursor(4 + (i % 3) * 78, 98 + (i / 3) * 10);
-      d.printf("%08x", (unsigned)sum->exc_bt_info.bt[i]);
-      Serial.printf("  bt[%u]=%08x\n", (unsigned)i, (unsigned)sum->exc_bt_info.bt[i]);
-    }
-    esp_core_dump_image_erase();   // so an old report can't be mistaken for a new one
-  } else {
-    d.setCursor(4, 68);
-    d.println("(no crash report saved)");
-  }
-  free(sum);
-  d.setTextColor(TFT_CYAN);
-  d.setCursor(4, 126);
-  d.println("Photo this. Any key = try again.");
-  Serial.printf("BOOT PROBLEM why=%s stage=%u boots=%u\n", resetName(why), (unsigned)died, (unsigned)boots);
-}
-
-// The UI is 240 x 135. The two Cardputer models mount the panel differently, so
-// rotation 1 is landscape on one and portrait on the other: take the first
-// rotation (1 first, so the original board is unchanged) that is wider than tall.
-static void setLandscape() {
-  auto& d = M5Cardputer.Display;
-  static const uint8_t ORDER[] = {1, 0, 3, 2};
-  for (uint8_t r : ORDER) {
-    d.setRotation(r);
-    if (d.width() > d.height()) return;
-  }
-}
+#ifdef BOOT_DEBUG
+#include <esp_system.h>
+#define DBG(...) Serial.printf(__VA_ARGS__)
+#else
+#define DBG(...)
+#endif
 
 void setup() {
-  esp_reset_reason_t why = esp_reset_reason();
-  bool valid = rtcMagic == RTC_MAGIC;
-  uint32_t diedAt = valid ? rtcStage : 0;
-  if (!valid || why == ESP_RST_POWERON) {
-    rtcBoots = 0;
-    diedAt = 0;
-  }
-  rtcMagic = RTC_MAGIC;
-  rtcBoots++;
-  bool crashed = valid && (why == ESP_RST_PANIC || why == ESP_RST_INT_WDT || why == ESP_RST_TASK_WDT ||
-                           why == ESP_RST_WDT || why == ESP_RST_BROWNOUT);
-
-  stage(1);
+#ifdef BOOT_DEBUG
+  Serial.begin(115200);
+  uint32_t t0 = millis();
+  while (!Serial && millis() - t0 < 4000) delay(10);  // give the console time to attach
+  delay(300);
+  DBG("\n\n[boot] Cardputer MIDI debug build\n");
+  DBG("[boot] reset reason: %d\n", (int)esp_reset_reason());
+  DBG("[boot] free heap: %u\n", (unsigned)ESP.getFreeHeap());
+  DBG("[boot] M5Cardputer.begin...\n");
+#endif
   auto cfg = M5.config();
-  if (crashed && diedAt <= 2) {  // it died inside the M5 init last time: try again without the speaker and mic
-    cfg.internal_spk = false;
-    cfg.internal_mic = false;
-  }
   M5Cardputer.begin(cfg, true);
-  stage(2);
-  setLandscape();
+  DBG("[boot] M5Cardputer.begin done, board=%d (ADV=%d, Cardputer=%d)\n", (int)M5.getBoard(),
+      (int)m5::board_t::board_M5CardputerADV, (int)m5::board_t::board_M5Cardputer);
+  DBG("[boot] display %dx%d\n", (int)M5Cardputer.Display.width(), (int)M5Cardputer.Display.height());
   M5Cardputer.Display.setBrightness(120);
 
-  if (crashed) {
-    showBootProblem(why, diedAt, rtcBoots);
-    for (;;) {  // wait for a key so the screen can be read
-      M5Cardputer.update();
-      if (M5Cardputer.Keyboard.isPressed()) break;
-      delay(50);
-    }
-    M5Cardputer.Display.fillScreen(TFT_BLACK);
-  }
+  // Each step is recorded so that if one crashes, the next start reports it
+  // on screen and skips it where possible.
+  bootguard::begin();
+  showReportIfCrashed();
 
-  stage(3);
+  stage(ST_SETTINGS);
   settingsLoad();
+  seq::songInit();
+  // The song you had open last time (or the one carried over from phase 2).
+  if (!seq::songLoadNamed(settings.lastSong,
+                          settings.lastSongOnSd ? seq::Storage::Sd : seq::Storage::Flash))
+    seq::songLoadNamed("untitled");
+  seq::engineBegin();
 
-  stage(4);
-  monitor::begin();
-  monitor::setVolume(settings.volume);
-  monitor::setEnabled(settings.speaker);
+  stage(ST_SPEAKER);
+  if (skipped(ST_SPEAKER)) settings.speaker = false;
+  synth::begin();
+  synth::setVolume(settings.volume);
+  synth::setEnabled(settings.speaker);
 
-  stage(5);
-  midi::begin(settings.bleMidi, settings.usbMidi);
-  stage(6);
+  stage(ST_MIDI_USB);
+  midi::beginUsb(settings.usbMidi && !skipped(ST_MIDI_USB));
+
+  stage(ST_MIDI_BLE);
+  if (!skipped(ST_MIDI_BLE)) midi::beginBle(settings.bleMidi);
+
+  stage(ST_KEYBOARD);
   keys::begin();
   player::begin();
-  stage(7);
-#ifndef CMC_MINIMAL
-  store::begin();
-  cloud::begin();
-#endif
-  stage(8);
-  seq::begin();
-#ifndef CMC_MINIMAL
-  genmode::begin();
-#endif
-  stage(9);
+
+  stage(ST_UI);
   ui::begin();
-  stage(10);
+
+  stage(ST_RUNNING);
+  DBG("[boot] setup finished, free heap: %u\n", (unsigned)ESP.getFreeHeap());
 }
 
 void loop() {
-  stage(11);
   M5Cardputer.update();  // scans the keyboard
-  genmode::tick();       // builds / starts generated songs
-  seq::update();         // song playback (before and after the redraw)
-  stage(12);
   ui::tick();            // key events -> notes / screens, redraw when needed
-  seq::update();
-  stage(13);
-  midi::update();        // sends this pass's BLE MIDI packet
+  {
+    seq::Lock l;
+    midi::update();  // sends this pass's BLE MIDI packet
+  }
+#ifdef BOOT_DEBUG
+  static uint32_t lastBeat = 0;
+  if (millis() - lastBeat > 2000) {
+    lastBeat = millis();
+    DBG("[alive] %lus, keys held: %u, heap: %u\n", (unsigned long)(millis() / 1000),
+        (unsigned)M5Cardputer.Keyboard.keyList().size(), (unsigned)ESP.getFreeHeap());
+  }
+#endif
 }

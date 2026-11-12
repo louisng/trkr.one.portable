@@ -4,20 +4,24 @@
 #include <string.h>
 
 #include "../app/Settings.h"
-#include "../audio/Monitor.h"
+#include "../audio/Synth.h"
 #include "../input/KeyInput.h"
 #include "../input/KeyLayout.h"
 #include "../midi/MidiOut.h"
 #include "../music/Theory.h"
+#include "../seq/Engine.h"
 
 namespace player {
 
 using layout::Role;
 
 struct Held {
-  uint8_t channel;  // 0 = nothing held
+  uint8_t channel;  // MIDI channel it went out on; 0 = nothing held
+  uint8_t track;
   uint8_t count;
-  uint8_t notes[theory::MAX_CHORD_NOTES];
+  uint8_t notes[theory::MAX_CHORD_NOTES];  // as stored in the song (drums: lane id)
+  bool drum;
+  uint8_t drumOut;  // drums: the MIDI note actually sent (see the track's drum routing)
 };
 
 static Held held[layout::KEY_COUNT];
@@ -26,8 +30,6 @@ static Held held[layout::KEY_COUNT];
 static uint8_t refs[16][128];
 static uint8_t inv = 0;
 static char last[16] = "";
-static NoteFilter noteFilter = nullptr;
-void setNoteFilter(NoteFilter f) { noteFilter = f; }
 
 // General MIDI drum notes for the 12 pads.
 static const uint8_t DRUM_NOTES[12] = {36, 38, 37, 39, 42, 46, 41, 45, 48, 49, 51, 56};
@@ -46,31 +48,37 @@ void begin() {
   memset(refs, 0, sizeof(refs));
 }
 
+static const char* const DRUM_SHORT[12] = {"KK", "SN", "RM", "CP", "CH", "OH",
+                                           "LT", "MT", "HT", "CR", "RD", "CB"};
+
 const char* drumName(uint8_t pad) { return pad < 12 ? DRUM_NAMES[pad] : ""; }
+const char* drumShortName(uint8_t pad) { return pad < 12 ? DRUM_SHORT[pad] : ""; }
+uint8_t drumNote(uint8_t pad) { return DRUM_NOTES[pad % 12]; }
+int drumPadForNote(uint8_t note) {
+  for (uint8_t i = 0; i < 12; i++)
+    if (DRUM_NOTES[i] == note) return i;
+  return -1;
+}
 uint8_t inversion() { return inv; }
 const char* lastPlayed() { return last; }
 bool keySounding(uint8_t k) { return k < layout::KEY_COUNT && held[k].channel != 0; }
 
-// What the speaker plays for each kind of key: piano = electric piano,
-// chords = organ (sustains cleanly), drums = the synth drum kit.
-static void startNote(uint8_t ch, uint8_t note, Role role) {
+static void startNote(uint8_t track, uint8_t ch, uint8_t note, bool drum, uint8_t pad) {
   uint8_t& r = refs[(ch - 1) & 15][note & 127];
   if (r == 0) {
     midi::noteOn(ch, note, settings.velocity);
-    if (role == Role::Drum) monitor::drum(note, settings.velocity);
-    else if (role == Role::Piano) monitor::noteOn(note, settings.velocity, monitor::Timbre::TB_EP, monitor::OWNER_LIVE_PIANO);
-    else monitor::noteOn(note, settings.velocity, monitor::Timbre::TB_ORGAN, monitor::OWNER_LIVE_CHORD);
+    if (drum) synth::drum(track, pad, settings.velocity);
+    else synth::noteOn(track, note, settings.velocity);
   }
   if (r < 255) r++;
 }
 
-static void stopNote(uint8_t ch, uint8_t note, Role role) {
+static void stopNote(uint8_t track, uint8_t ch, uint8_t note, bool drum) {
   uint8_t& r = refs[(ch - 1) & 15][note & 127];
   if (r == 0) return;
   if (--r == 0) {
     midi::noteOff(ch, note);
-    if (role == Role::Piano) monitor::noteOff(note, monitor::OWNER_LIVE_PIANO);
-    else if (role == Role::Chord) monitor::noteOff(note, monitor::OWNER_LIVE_CHORD);
+    if (!drum) synth::noteOff(track, note);
   }
 }
 
@@ -82,6 +90,7 @@ int pianoNoteFor(uint8_t semitone) {
   if (settings.pianoScaleMode) {
     int deg = WHITE_TO_DEGREE[semitone % 12];
     if (deg < 0) return -1;  // black keys are unused in scale mode
+    deg += 7 * (semitone / 12);
     n = base + settings.root + theory::scaleOffset(settings.scale, deg);
   } else {
     n = base + semitone;
@@ -92,14 +101,15 @@ int pianoNoteFor(uint8_t semitone) {
 static void press(uint8_t k, const layout::KeyDef& def) {
   Held& h = held[k];
   if (h.channel) return;  // already sounding
+  const uint8_t synthTrack = seq::liveSynthTrack();
+  const uint8_t drumTrack = seq::liveDrumTrack();
 
   switch (def.role) {
     case Role::Piano: {
       int n = pianoNoteFor(def.value);
-      if (n >= 0 && noteFilter) n = noteFilter(n);
       if (n < 0) return;
-      h = {settings.pianoCh, 1, {(uint8_t)n}};
-      startNote(h.channel, (uint8_t)n, Role::Piano);
+      h = {seq::song.tracks[synthTrack].channel, synthTrack, 1, {(uint8_t)n}};
+      startNote(h.track, h.channel, (uint8_t)n, false, 0);
       theory::formatNote((uint8_t)n, last);
       break;
     }
@@ -115,17 +125,20 @@ static void press(uint8_t k, const layout::KeyDef& def) {
       theory::Chord c = theory::buildChord(settings.scale, settings.root, def.value,
                                            (uint8_t)bass, mods);
       if (!c.count) return;
-      h.channel = settings.chordCh;
+      h.channel = seq::song.tracks[synthTrack].channel;
+      h.track = synthTrack;
       h.count = c.count;
       memcpy(h.notes, c.notes, c.count);
-      for (uint8_t i = 0; i < c.count; i++) startNote(h.channel, c.notes[i], Role::Chord);
+      for (uint8_t i = 0; i < c.count; i++) startNote(h.track, h.channel, c.notes[i], false, 0);
       snprintf(last, sizeof(last), "%s", c.name);
       break;
     }
     case Role::Drum: {
       uint8_t pad = def.value % 12;
-      h = {settings.drumCh, 1, {DRUM_NOTES[pad]}};
-      startNote(h.channel, DRUM_NOTES[pad], Role::Drum);
+      uint8_t ch, note;
+      seq::midiOut(seq::song.tracks[drumTrack], DRUM_NOTES[pad], &ch, &note);
+      h = {ch, drumTrack, 1, {DRUM_NOTES[pad]}, true, note};
+      startNote(h.track, h.channel, note, true, pad);
       snprintf(last, sizeof(last), "%s", DRUM_NAMES[pad]);
       break;
     }
@@ -137,19 +150,40 @@ static void press(uint8_t k, const layout::KeyDef& def) {
 static void release(uint8_t k, const layout::KeyDef& def) {
   Held& h = held[k];
   if (!h.channel) return;
-  for (uint8_t i = 0; i < h.count; i++) stopNote(h.channel, h.notes[i], def.role);
+  (void)def;
+  if (h.drum) stopNote(h.track, h.channel, h.drumOut, true);
+  else
+    for (uint8_t i = 0; i < h.count; i++) stopNote(h.track, h.channel, h.notes[i], false);
+  h.drum = false;
   h.channel = 0;
   h.count = 0;
 }
 
-bool onKey(uint8_t k, bool pressed) {
+static void fillPlayed(Played* out, uint8_t k, const layout::KeyDef& def, bool pressed) {
+  if (!out) return;
+  const Held& h = held[k];
+  out->valid = h.channel != 0;
+  out->pressed = pressed;
+  out->role = def.role;
+  out->track = h.track;
+  out->pad = def.role == Role::Drum ? def.value % 12 : 0;
+  out->count = h.count;
+  memcpy(out->notes, h.notes, h.count);
+}
+
+bool onKey(uint8_t k, bool pressed, Played* out) {
   const layout::KeyDef& def = layout::keyAt(k);
   switch (def.role) {
     case Role::Piano:
     case Role::Chord:
     case Role::Drum:
-      if (pressed) press(k, def);
-      else release(k, def);
+      if (pressed) {
+        press(k, def);
+        fillPlayed(out, k, def, true);
+      } else {
+        fillPlayed(out, k, def, false);  // before release clears it
+        release(k, def);
+      }
       return true;
     case Role::Action:
       if (!pressed) return false;
