@@ -30,6 +30,9 @@ struct Settings {
   char wifiPass[65] = "";
   char cloudToken[64] = "";
   char cloudEmail[64] = "";
+  // Generated mode
+  uint8_t genGenre = 0;    // genre for the next songs
+  uint8_t genAlong = 1;    // play-along filter: 0 free, 1 chord tones, 2 snap to chord, 3 scale
   // New fields go at the end: older saved settings still load (the new
   // fields keep their defaults).
 };

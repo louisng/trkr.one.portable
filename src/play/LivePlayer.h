@@ -27,6 +27,11 @@ void begin();
 bool onKey(uint8_t keyIndex, bool pressed, Played* out = nullptr);
 void releaseAll();  // stop everything that's held (e.g. when switching screens)
 
+// Optional play-along filter for the piano keys: given the pitch a key would
+// play, return the pitch to play instead, or -1 to stay silent. nullptr = none.
+typedef int (*NoteFilter)(int note);
+void setNoteFilter(NoteFilter f);
+
 uint8_t inversion();
 // Text describing the most recent thing played, e.g. "Cmaj7", "E4", "Snare".
 const char* lastPlayed();

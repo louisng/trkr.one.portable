@@ -66,27 +66,29 @@ static bool lessNote(const seq::NoteEvent& a, const seq::NoteEvent& b) {
 }
 
 // ── website -> device ────────────────────────────────────────────────────────
-bool toDevice(const Song& in, seq::Song& out, Meta& meta, const char** error) {
+bool Importer::begin(const Song& in, Meta& meta, const char** error) {
   auto fail = [&](const char* m) {
     if (error) *error = m;
     return false;
   };
-  seq::songInitInto(out);
-  const uint8_t nT = in.trackCount > seq::TRACKS ? seq::TRACKS : in.trackCount;
-  if (nT == 0) return fail("song has no tracks");
-  if (in.patterns.empty()) return fail("song has no patterns");
+  seq::songInitInto(out_);
+  nT_ = in.trackCount > seq::TRACKS ? seq::TRACKS : in.trackCount;
+  if (nT_ == 0) return fail("song has no tracks");
+  scenes_ = 0;
+  memset(slots_, 0, sizeof(slots_));
+  arrange_.clear();
 
-  out.bpm = (uint16_t)clampi(in.bpm, seq::BPM_MIN, seq::BPM_MAX);
+  out_.bpm = (uint16_t)clampi(in.bpm, seq::BPM_MIN, seq::BPM_MAX);
   meta = Meta();
   meta.swing = in.swing;
   meta.key = in.key;
   meta.scale = in.scale;
-  meta.trackCount = nT;
+  meta.trackCount = nT_;
   strncpy(meta.title, in.name, sizeof(meta.title) - 1);
 
-  for (uint8_t t = 0; t < nT; t++) {
+  for (uint8_t t = 0; t < nT_; t++) {
     const Track& s = in.tracks[t];
-    seq::Track& d = out.tracks[t];
+    seq::Track& d = out_.tracks[t];
     strncpy(d.name, s.name, sizeof(d.name) - 1);
     d.name[sizeof(d.name) - 1] = 0;
     const bool drum = s.type == TrackType::Drum;
@@ -112,93 +114,115 @@ bool toDevice(const Song& in, seq::Song& out, Meta& meta, const char** error) {
     meta.tracks[t].strum = s.strum;
   }
   // Tracks the website song doesn't have stay silent.
-  for (auto& sc : out.scenes)
+  for (auto& sc : out_.scenes)
     for (uint8_t t = 0; t < seq::TRACKS; t++)
-      if (t >= nT) sc.pattern[t] = seq::SCENE_SILENT;
+      if (t >= nT_) sc.pattern[t] = seq::SCENE_SILENT;
+  return true;
+}
 
-  // The order: patterns in the order they are first played (all of them if empty).
+bool Importer::addPattern(const Pattern& wp, const char** error) {
+  auto fail = [&](const char* m) {
+    if (error) *error = m;
+    return false;
+  };
+  const uint16_t len = (uint16_t)clampi(wp.len, 1, seq::MAX_STEPS);
+  uint8_t scene[seq::TRACKS];
+  for (auto& v : scene) v = seq::SCENE_SILENT;
+  bool any = false;
+  for (uint8_t t = 0; t < nT_; t++) {
+    seq::Pattern cand;
+    cand.length = (uint8_t)len;
+    for (const Event& e : wp.events) {
+      if (e.track != t || e.step >= len) continue;
+      for (uint8_t k = 0; k < e.count && k < MAX_NOTES; k++) {
+        int pitch = e.notes[k];
+        if (out_.tracks[t].kind == seq::TrackKind::Drum) {
+          pitch = mapDrumNote((uint8_t)pitch);
+          if (pitch < 0) continue;
+        }
+        seq::NoteEvent n{};
+        n.step = e.step;
+        n.offset = (int8_t)clampi(e.delay / 2, -(seq::TICKS_PER_STEP / 2), seq::TICKS_PER_STEP / 2 - 1);
+        n.pitch = (uint8_t)pitch;
+        n.vel = (uint8_t)clampi(e.vel, 1, 127);
+        n.len = (uint16_t)std::max(1, e.len24 / 2);
+        n.flags = 0;
+        cand.notes.push_back(n);
+      }
+    }
+    if (cand.notes.empty()) continue;  // silent in this pattern
+    std::sort(cand.notes.begin(), cand.notes.end(), lessNote);
+    // two notes on the same step and pitch collapse into one
+    cand.notes.erase(std::unique(cand.notes.begin(), cand.notes.end(),
+                                 [](const seq::NoteEvent& a, const seq::NoteEvent& b) {
+                                   return a.step == b.step && a.pitch == b.pitch;
+                                 }),
+                     cand.notes.end());
+    any = true;
+    int slot = -1;
+    for (uint8_t i = 0; i < slots_[t]; i++)
+      if (sameNotes(out_.tracks[t].patterns[i], cand)) {
+        slot = i;
+        break;
+      }
+    if (slot < 0) {
+      if (slots_[t] >= seq::PATTERNS) return fail("a track needs more different patterns than the device holds");
+      slot = slots_[t]++;
+      cand.notes.shrink_to_fit();  // no spare capacity: a song holds thousands of notes
+      out_.tracks[t].patterns[slot] = std::move(cand);
+    }
+    scene[t] = (uint8_t)slot;
+  }
+  if (!any) {
+    // Nothing plays in this pattern (a rest): keep its length on track 1.
+    int slot = -1;
+    for (uint8_t i = 0; i < slots_[0]; i++)
+      if (out_.tracks[0].patterns[i].notes.empty() && out_.tracks[0].patterns[i].length == len) slot = i;
+    if (slot < 0 && slots_[0] < seq::PATTERNS) {
+      slot = slots_[0]++;
+      out_.tracks[0].patterns[slot].length = (uint8_t)len;
+      out_.tracks[0].patterns[slot].notes.clear();
+    }
+    if (slot >= 0) scene[0] = (uint8_t)slot;
+  }
+  // The same combination of patterns as an earlier scene is the same scene.
+  int sc = -1;
+  for (int i = 0; i < scenes_; i++)
+    if (memcmp(out_.scenes[i].pattern, scene, seq::TRACKS) == 0) {
+      sc = i;
+      break;
+    }
+  if (sc < 0) {
+    if (scenes_ >= seq::SCENES) return fail("uses more than 99 different patterns");
+    sc = scenes_++;
+    memcpy(out_.scenes[sc].pattern, scene, seq::TRACKS);
+  }
+  if (arrange_.size() < seq::ARRANGE_MAX) arrange_.push_back((uint8_t)sc);
+  return true;
+}
+
+void Importer::finish() {
+  out_.arrange = arrange_;
+  if (out_.arrange.empty()) out_.arrange.assign(1, 0);
+  out_.songMode = true;
+}
+
+bool toDevice(const Song& in, seq::Song& out, Meta& meta, const char** error) {
+  if (in.patterns.empty()) {
+    if (error) *error = "song has no patterns";
+    return false;
+  }
+  Importer imp(out);
+  if (!imp.begin(in, meta, error)) return false;
+  // The order: patterns in the order they are played (all of them if empty).
   std::vector<uint8_t> order;
   for (uint8_t p : in.order)
     if (p < in.patterns.size()) order.push_back(p);
   if (order.empty())
     for (size_t p = 0; p < in.patterns.size(); p++) order.push_back((uint8_t)p);
-
-  std::vector<int> sceneOf(in.patterns.size(), -1);
-  uint8_t slots[seq::TRACKS] = {0};
-  int sceneCount = 0;
-  std::vector<uint8_t> arrange;
-  for (uint8_t pi : order) {
-    if (sceneOf[pi] < 0) {
-      if (sceneCount >= seq::SCENES) return fail("uses more than 99 different patterns");
-      const int sc = sceneCount++;
-      sceneOf[pi] = sc;
-      const Pattern& wp = in.patterns[pi];
-      const uint16_t len = (uint16_t)clampi(wp.len, 1, seq::MAX_STEPS);
-      bool any = false;
-      for (uint8_t t = 0; t < nT; t++) {
-        seq::Pattern cand;
-        cand.length = (uint8_t)len;
-        for (const Event& e : wp.events) {
-          if (e.track != t || e.step >= len) continue;
-          for (uint8_t k = 0; k < e.count && k < MAX_NOTES; k++) {
-            int pitch = e.notes[k];
-            if (out.tracks[t].kind == seq::TrackKind::Drum) {
-              pitch = mapDrumNote((uint8_t)pitch);
-              if (pitch < 0) continue;
-            }
-            seq::NoteEvent n{};
-            n.step = e.step;
-            n.offset = (int8_t)clampi(e.delay / 2, -(seq::TICKS_PER_STEP / 2), seq::TICKS_PER_STEP / 2 - 1);
-            n.pitch = (uint8_t)pitch;
-            n.vel = (uint8_t)clampi(e.vel, 1, 127);
-            n.len = (uint16_t)std::max(1, e.len24 / 2);
-            n.flags = 0;
-            cand.notes.push_back(n);
-          }
-        }
-        if (cand.notes.empty()) {
-          out.scenes[sc].pattern[t] = seq::SCENE_SILENT;
-          continue;
-        }
-        std::sort(cand.notes.begin(), cand.notes.end(), lessNote);
-        // two notes on the same step and pitch collapse into one
-        cand.notes.erase(std::unique(cand.notes.begin(), cand.notes.end(),
-                                     [](const seq::NoteEvent& a, const seq::NoteEvent& b) {
-                                       return a.step == b.step && a.pitch == b.pitch;
-                                     }),
-                         cand.notes.end());
-        any = true;
-        int slot = -1;
-        for (uint8_t i = 0; i < slots[t]; i++)
-          if (sameNotes(out.tracks[t].patterns[i], cand)) {
-            slot = i;
-            break;
-          }
-        if (slot < 0) {
-          if (slots[t] >= seq::PATTERNS) return fail("a track needs more different patterns than the device holds");
-          slot = slots[t]++;
-          out.tracks[t].patterns[slot] = std::move(cand);
-        }
-        out.scenes[sc].pattern[t] = (uint8_t)slot;
-      }
-      if (!any) {
-        // Nothing plays in this pattern (a rest): keep its length on track 1.
-        int slot = -1;
-        for (uint8_t i = 0; i < slots[0]; i++)
-          if (out.tracks[0].patterns[i].notes.empty() && out.tracks[0].patterns[i].length == len) slot = i;
-        if (slot < 0 && slots[0] < seq::PATTERNS) {
-          slot = slots[0]++;
-          out.tracks[0].patterns[slot].length = (uint8_t)len;
-          out.tracks[0].patterns[slot].notes.clear();
-        }
-        if (slot >= 0) out.scenes[sc].pattern[0] = (uint8_t)slot;
-      }
-    }
-    if (arrange.size() < seq::ARRANGE_MAX) arrange.push_back((uint8_t)sceneOf[pi]);
-  }
-  out.arrange = arrange;
-  if (out.arrange.empty()) out.arrange.assign(1, 0);
-  out.songMode = true;
+  for (uint8_t pi : order)
+    if (!imp.addPattern(in.patterns[pi], error)) return false;
+  imp.finish();
   return true;
 }
 

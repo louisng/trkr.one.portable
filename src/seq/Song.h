@@ -205,6 +205,9 @@ bool songCopy(const char* name, Storage from, Storage to);
 // leaving the open song alone. Flash or SD, by name.
 bool songSaveCopy(const char* name, const Song& s, Storage st = Storage::Flash);
 bool songLoadCopy(const char* name, Song& out, Storage st = Storage::Flash);
+// The open song no longer belongs to a saved file (so saving asks for a name
+// instead of overwriting the old one). Used when a song is generated.
+void songForgetName();
 void songNew();
 std::vector<String> songList(Storage st = Storage::Flash);  // sorted names
 

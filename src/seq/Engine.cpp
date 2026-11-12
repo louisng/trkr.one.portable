@@ -37,6 +37,7 @@ static uint8_t songPos = 0;          // index into song.arrange
 static uint8_t songStartPos = 0;     // where play() starts in song mode
 static uint32_t sceneStart = 0, sceneLen = 0;
 static bool silent[TRACKS];          // track is silent in the current scene
+static WrapHook wrapHook = nullptr;
 
 static uint32_t baseTick() { return songActive ? sceneStart : origin; }
 
@@ -197,7 +198,9 @@ static void processTick(uint32_t tick) {
     origin = sceneStart;  // keep tracks where they are
     for (auto& s : silent) s = false;
   } else if (songActive && tick - sceneStart >= sceneLen) {
-    songPos = (uint8_t)((songPos + 1) % song.arrange.size());
+    const bool wrapped = (size_t)songPos + 1 >= song.arrange.size();
+    if (wrapped && wrapHook) wrapHook();  // may replace the song: the arrangement starts again from row 1
+    songPos = wrapped ? 0 : (uint8_t)(songPos + 1);
     enterScene(tick);
   }
 
@@ -338,6 +341,16 @@ void play() {
 }
 
 void setSongStart(uint8_t pos) { songStartPos = pos; }
+void setWrapHook(WrapHook hook) { wrapHook = hook; }
+
+int32_t songStep() {
+  Lock l;
+  if (!isPlaying || !songActive) return -1;
+  uint32_t steps = 0;
+  for (size_t i = 0; i < songPos && i < song.arrange.size(); i++) steps += sceneSteps(song.arrange[i]);
+  const uint32_t into = nextTick >= sceneStart ? (nextTick - sceneStart) / TICKS_PER_STEP : 0;
+  return (int32_t)(steps + into);
+}
 int songPosition() { return (isPlaying && songActive) ? songPos : -1; }
 
 void applyScene(uint8_t scene) {

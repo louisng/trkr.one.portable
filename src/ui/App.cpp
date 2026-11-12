@@ -8,6 +8,7 @@
 #include "../midi/BleMidi.h"
 #include "../midi/MidiOut.h"
 #include "../net/Cloud.h"
+#include "../play/GenMode.h"
 #include "../music/Theory.h"
 #include "../play/LivePlayer.h"
 #include "../seq/Engine.h"
@@ -54,7 +55,7 @@ static bool adv = false;
 
 // Shortcut keys, looked up by key cap so they follow the layout table.
 static int8_t idxDigit[10];
-static int8_t idxB = -1, idxU = -1, idxM = -1, idxP = -1, idxS = -1, idxT = -1, idxX = -1, idxC = -1, idxW = -1;
+static int8_t idxB = -1, idxU = -1, idxM = -1, idxP = -1, idxS = -1, idxT = -1, idxX = -1, idxC = -1, idxW = -1, idxG = -1;
 
 static int8_t findCap(const char* cap) {
   for (uint8_t r = 0; r < layout::ROWS; r++)
@@ -185,6 +186,7 @@ static void handleMenuKey(uint8_t idx) {
   else if (idx == idxDigit[9]) switchTo(drumMidiScreen());
   else if (idx == idxC) switchTo(connectScreen());
   else if (idx == idxW) switchTo(cloudScreen());
+  else if (idx == idxG) switchTo(genScreen());
   else if (idx == idxB) toggleBle();
   else if (idx == idxU) toggleUsb();
   else if (idx == idxM) toggleSpeaker();
@@ -299,6 +301,8 @@ static void handleEvent(const keys::Event& e) {
     return;
   }
 
+  if (current->consumeKey(e.index, e.pressed)) return;
+
   if (e.pressed && isAction && def.value == layout::ACT_PLAY && current->spaceIsPlay()) {
     handleTransport(def.value);
     return;
@@ -401,8 +405,9 @@ static void drawMenu() {
   canvas.drawString("c Connect BT", x + 8 + 2 * 68, y + 49);
 
   char buf[40];
-  snprintf(buf, sizeof(buf), "s Save %s", seq::currentSongName()[0] ? seq::currentSongName() : "as...");
+  snprintf(buf, sizeof(buf), "s Save %.9s", seq::currentSongName()[0] ? seq::currentSongName() : "as...");
   canvas.drawString(buf, x + 8, y + 61);
+  canvas.drawString("g Generate", x + 110, y + 61);
   snprintf(buf, sizeof(buf), "b BLE: %s", settings.bleMidi ? "ON" : "off");
   canvas.drawString(buf, x + 8, y + 72);
   snprintf(buf, sizeof(buf), "u USB: %s", settings.usbMidi ? "ON" : "off");
@@ -450,6 +455,8 @@ static void render() {
 static bool lowColor = false;
 static bool jobMode = false;
 
+static uint32_t colorRetryAt = 0;  // after a failed return to full colour, wait before trying again
+
 static void setLowColor(bool on) {
   if (on == lowColor) return;
   canvas.deleteSprite();
@@ -459,14 +466,24 @@ static void setLowColor(bool on) {
     canvas.setColorDepth(8);
     canvas.createSprite(W, H);
     on = true;
+    colorRetryAt = millis() + 3000;
   }
   lowColor = on;
   dirty = true;
 }
 
+// Generated mode builds the next song while one plays: that needs the RAM the
+// 16-bit screen buffer holds, so the screen runs in 8-bit colour meanwhile.
+static void genColorTick() {
+  if (jobMode) return;  // a cloud job decides the colour depth
+  const bool want = genmode::running();
+  if (want != lowColor && (int32_t)(millis() - colorRetryAt) >= 0) setLowColor(want);
+}
+
 static void cloudMemoryTick() {
   if (cloud::needsMemory() && !jobMode) {
     jobMode = true;
+    if (genmode::running()) genmode::stop();  // its song building needs the same memory
     synth::pause();
     setLowColor(true);
     cloud::memoryReady();  // the job's worker is created only now
@@ -497,6 +514,7 @@ void begin() {
   idxX = findCap("x");
   idxC = findCap("c");
   idxW = findCap("w");
+  idxG = findCap("g");
   applyBtAuto();  // reconnect the remembered Bluetooth device
   layout::setUpperPiano(settings.upperPiano);
   lastBle = midi::bleState();
@@ -517,6 +535,8 @@ void tick() {
 
   uint32_t now = millis();
   cloudMemoryTick();
+  genColorTick();
+  genmode::tick();
   watchRemote();
   midi::LinkState b = midi::bleState(), u = midi::usbState();
   if (b != lastBle || u != lastUsb) {

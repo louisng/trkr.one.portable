@@ -16,6 +16,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <vector>
+
 #include "../seq/Song.h"
 #include "TrkrSong.h"
 
@@ -31,6 +33,27 @@ struct Meta {
     uint8_t vol = 80;   // 0-100
     uint8_t strum = 0;
   } tracks[MAX_TRACKS];
+};
+
+// Builds a device song one pattern at a time, as a generator makes them: each
+// call is one pattern played once, in play order (a repeated pattern is fine:
+// identical music is stored once). Nothing but the finished device song is
+// ever held, so a whole generated song never exists in the website format.
+class Importer {
+ public:
+  explicit Importer(seq::Song& out) : out_(out) {}
+  // tempo, tracks (and, in meta, what the device doesn't keep); head's patterns are ignored
+  bool begin(const Song& head, Meta& meta, const char** error);
+  bool addPattern(const Pattern& p, const char** error);
+  void finish();
+  uint8_t scenes() const { return (uint8_t)scenes_; }
+
+ private:
+  seq::Song& out_;
+  uint8_t nT_ = 0;
+  uint8_t slots_[seq::TRACKS] = {0};
+  int scenes_ = 0;
+  std::vector<uint8_t> arrange_;
 };
 
 // false: the song can't be held on the device (*error says why).

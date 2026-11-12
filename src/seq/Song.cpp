@@ -629,6 +629,8 @@ bool songCopy(const char* name, Storage from, Storage to) {
   return dst->rename(tmp, path);
 }
 
+void songForgetName() { currentName[0] = 0; }
+
 void songNew() {
   songInit();
   currentName[0] = 0;

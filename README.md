@@ -165,6 +165,32 @@ classic tracker layout: `q w e r t y u i o p [ ] \` are white keys (C up to A) a
     after a restart. **Disconnect** stops that until the next power-on.
   - Phones / computers can still connect to the Cardputer at the same time; MIDI goes to
     everything connected, and the BLE light shows green if anything is.
+- **Generate** (hold `` ` `` + `g`): endless songs made on the device by the same generator as
+  trkr.one (the same seed makes the same song on both), in the genre you pick.
+  - `,` `/` genre · `space` start / pause · `enter` a new song now · `del` switch it off.
+  - Each song is an ordinary song (scenes + arrangement), so everything works on it: `fn` +
+    `1`…`8` mutes a part, the built-in synth and every track's MIDI channel apply, and
+    `fn` + `s` saves it (it asks for a name, it never overwrites the song you had open). It
+    can be edited on the Step / Tracker screens and synced like any other song.
+  - While one song plays the next is built in the background and swapped in exactly when the
+    arrangement starts over. Mutes, and channels you changed, carry over to the next song.
+  - **Play along:** the piano keys follow the song's chord. `;` `.` choose the rule: chord tones
+    only, snapped to the chord, the scale that fits it, or any note.
+  - While it runs the screen drops to 8-bit colour (the next song needs the RAM) and returns to
+    full colour when you switch it off. It stops itself when you open a song or start a cloud job.
+- **Generate** (hold `` ` `` + `g`): endless songs made on the device by the same generator as
+  trkr.one (the same seed makes the same song on both), in the genre you pick.
+  - `,` `/` genre · `space` start / pause · `enter` a new song now · `del` switch it off.
+  - Each song is an ordinary song (scenes + arrangement), so everything works on it: `fn` +
+    `1`…`8` mutes a part, the built-in synth and every track's MIDI channel apply, and
+    `fn` + `s` saves it (it asks for a name, it never overwrites the song you had open). It
+    can be edited on the Step / Tracker screens and synced like any other song.
+  - While one song plays the next is built in the background and swapped in exactly when the
+    arrangement starts over. Mutes, and channels you changed, carry over to the next song.
+  - **Play along:** the piano keys follow the song's chord. `;` `.` choose the rule: chord tones
+    only, snapped to the chord, the scale that fits it, or any note.
+  - While it runs the screen drops to 8-bit colour (the next song needs the RAM) and returns to
+    full colour when you switch it off. It stops itself when you open a song or start a cloud job.
 - **Cloud** (hold `` ` `` + `w`): WiFi and [trkr.one](https://trkr.one) song sync.
   - *WiFi:* choose a network from the scan (`space` rescans; "Other network" is for a hidden
     one). WiFi and your login are kept in the settings file, so flashing doesn't erase them.

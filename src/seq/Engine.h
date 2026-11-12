@@ -49,6 +49,14 @@ void setSongStart(uint8_t pos);
 int songPosition();
 void applyScene(uint8_t scene);
 
+// Called (with the engine lock held) at the moment the arrangement runs out
+// and is about to start again from its first row. Generated mode uses it to
+// swap in the next song exactly on the beat. nullptr = none.
+typedef void (*WrapHook)();
+void setWrapHook(WrapHook hook);
+// Steps (16ths) played since the arrangement started, or -1 if not in song mode / stopped.
+int32_t songStep();
+
 // Current step of a track's pattern, or -1 when stopped.
 int trackStep(uint8_t t);
 

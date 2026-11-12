@@ -7,6 +7,7 @@
 #include "audio/Synth.h"
 #include "input/KeyInput.h"
 #include "midi/MidiOut.h"
+#include "play/GenMode.h"
 #include "play/LivePlayer.h"
 #include "seq/Engine.h"
 #include "ui/Ui.h"

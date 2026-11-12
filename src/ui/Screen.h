@@ -45,6 +45,9 @@ class Screen {
   virtual void onPlayed(uint8_t key, const player::Played& p) {}
   // Every raw key event, before anything else handles it.
   virtual void onRawKey(uint8_t index, bool pressed) {}
+  // Return true to take a key for this screen before the app's own handling
+  // (transport, live playing). Used where enter / space mean something else.
+  virtual bool consumeKey(uint8_t index, bool pressed) { return false; }
   virtual void draw(M5Canvas& c) = 0;
   // True while the screen needs periodic redraws (blinking cursor etc.).
   virtual bool animating() const { return false; }
@@ -60,6 +63,7 @@ Screen* synthScreen();
 Screen* drumMidiScreen();
 Screen* connectScreen();
 Screen* cloudScreen();
+Screen* genScreen();
 void songsStartSaveAs();  // call before switching to songsScreen()
 Screen* setupScreen();
 Screen* keyTestScreen();
