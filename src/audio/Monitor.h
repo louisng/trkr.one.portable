@@ -18,6 +18,9 @@ static constexpr uint8_t OWNER_LIVE_CHORD = 9;
 
 void begin();
 void setEnabled(bool on);
+// Release the speaker driver (frees RAM) while WiFi/TLS runs; resume() restarts it.
+void pause();
+void resume();
 void setVolume(uint8_t v);
 // timbre: sound for a song track's voice name (e.g. "ep", "fingerbass")
 uint8_t timbreFor(const char* voice, uint8_t trackType);

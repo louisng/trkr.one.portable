@@ -51,6 +51,11 @@ void startLink();             // background: WiFi → code → wait for approval
 void startLogin(const char* email, const char* password);
 void startSync();             // background: WiFi → two-way song sync
 void cancel();
+// The UI frees RAM (screen colour, speaker) around a job: the job waits for
+// memoryReady() before it starts and for restored() before it reloads Bluetooth.
+void memoryReady();
+bool finishing();             // job done: the UI should now restore what it freed
+void restored();
 
 uint32_t lastSyncMs();        // millis() of the last good sync, 0 = never
 uint16_t lastDownloaded();

@@ -7,6 +7,8 @@
 #include "../input/KeyInput.h"
 #include "../input/KeyLayout.h"
 #include "../midi/MidiOut.h"
+#include "../net/Cloud.h"
+#include "../play/GenMode.h"
 #include "../music/Theory.h"
 #include "../play/LivePlayer.h"
 #include "Screen.h"
@@ -210,6 +212,43 @@ static void render() {
   canvas.pushSprite(0, 0);
 }
 
+// ── RAM for the cloud ────────────────────────────────────────────────────────
+// WiFi plus the secure connection need ~100 KB. While a cloud job runs the
+// screen buffer drops to 8-bit colour (32 KB instead of 64 KB), the speaker
+// driver is released and generated playback stops; all of it comes back after.
+static bool lowColor = false;
+static bool jobMode = false;
+
+static void setLowColor(bool on) {
+  if (on == lowColor) return;
+  canvas.deleteSprite();
+  canvas.setColorDepth(on ? 8 : 16);
+  if (!canvas.createSprite(W, H)) {
+    // No room for full colour: stay in 8-bit rather than have no screen at all.
+    canvas.setColorDepth(8);
+    canvas.createSprite(W, H);
+    on = true;
+  }
+  lowColor = on;
+  dirty = true;
+}
+
+static void cloudMemoryTick() {
+  bool busy = cloud::busy();
+  if (busy && !jobMode) {
+    jobMode = true;
+    if (genmode::running()) genmode::stop();
+    monitor::pause();
+    setLowColor(true);
+    cloud::memoryReady();
+  } else if (jobMode && cloud::finishing()) {
+    setLowColor(false);
+    monitor::resume();
+    jobMode = false;
+    cloud::restored();
+  }
+}
+
 void begin() {
   new (canvasMem) M5Canvas(&M5Cardputer.Display);
   adv = M5.getBoard() == m5::board_t::board_M5CardputerADV;
@@ -245,6 +284,7 @@ void tick() {
     lastUsb = u;
     dirty = true;
   }
+  cloudMemoryTick();
   current->tick();
   // Menu overlay appears after a short delay; toast disappears on its own.
   if (menuVisible() != menuDrawn) dirty = true;

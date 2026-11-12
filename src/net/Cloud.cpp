@@ -28,6 +28,7 @@ static volatile State st = State::Idle;
 static char msg[64] = "";
 static char detailBuf[64] = "";
 static uint16_t bleFreedKb = 0;
+static volatile bool memReady = false, fin = false, uiRestored = false;
 static char code[16] = "";
 static char url[48] = "";
 static char cfgSsid[33] = "", cfgPass[65] = "", cfgToken[64] = "", cfgEmail[64] = "", cfgHost[40] = "";
@@ -68,6 +69,9 @@ void begin() { loadPrefs(); }
 State state() { return st; }
 const char* message() { return msg; }
 const char* detail() { return detailBuf; }
+void memoryReady() { memReady = true; }
+bool finishing() { return fin; }
+void restored() { uiRestored = true; }
 int bleFreedLastKb() { return bleFreedKb; }
 const char* linkCode() { return code; }
 const char* linkUrl() { return url; }
@@ -502,6 +506,7 @@ static void worker(void*) {
   bool ok = false;
   // WiFi and the secure connection need a lot of RAM; Bluetooth holds ~50 KB
   // even when switched off, so unload it for the duration of the job.
+  for (uint32_t t0 = millis(); !memReady && millis() - t0 < 3000;) delay(20);  // let the UI free RAM first
   uint32_t before = esp_get_free_heap_size();
   midi::pauseBle();
   bleFreedKb = (uint16_t)((esp_get_free_heap_size() - before) / 1024);
@@ -515,6 +520,10 @@ static void worker(void*) {
   if (cancelReq) setMsg("Cancelled");
   memset(loginPass, 0, sizeof(loginPass));
   wifiDown();
+  // Give the UI the freed RAM back first (it needs one big block for the screen),
+  // and only then reload Bluetooth.
+  fin = true;
+  for (uint32_t t0 = millis(); !uiRestored && millis() - t0 < 3000;) delay(20);
   midi::resumeBle();
   st = ok ? State::Done : State::Failed;
   task = nullptr;
@@ -526,6 +535,7 @@ static void start(Job j) {
   job = j;
   cancelReq = false;
   detailBuf[0] = 0;
+  memReady = fin = uiRestored = false;
   if (j != Job::Login) memset(loginPass, 0, sizeof(loginPass));
   // TLS needs a deep stack.
   st = State::Connecting;

@@ -26,6 +26,8 @@ static int beepBlocksLeft = 0;
 static synth::Core* core = nullptr;
 static QueueHandle_t queue = nullptr;
 static volatile bool enabled = true;
+static volatile bool paused = false;    // asked to release the speaker
+static volatile bool released = false;  // the audio task has released it
 static int16_t bufs[3][BLOCK];   // one playing, one queued, one being filled
 
 static void send(const Cmd& c) {
@@ -52,6 +54,25 @@ static void audioTask(void*) {
     // Always give other tasks a turn: if the speaker ever stops taking data this
     // loop must not spin, or the watchdog resets the whole device.
     vTaskDelay(1);
+    if (paused) {
+      if (!released) {
+        core->allOff();
+        M5Cardputer.Speaker.end();
+        released = true;
+      }
+      vTaskDelay(pdMS_TO_TICKS(50));
+      continue;
+    }
+    if (released) {  // resume: restart the speaker, start from silence
+      if (M5Cardputer.Speaker.begin()) {
+        core->allOff();
+        released = false;
+        idle = 0;
+      } else {
+        vTaskDelay(pdMS_TO_TICKS(100));
+        continue;
+      }
+    }
     Cmd c;
     bool silent = core->activeVoices() == 0 && core->activeDrums() == 0;
     // Nothing sounding for a while: sleep until the next command arrives.
@@ -111,6 +132,18 @@ void begin() {
 void setEnabled(bool on) {
   enabled = on;
   if (!on) send({3, 0, 0, 0, 0});
+}
+
+void pause() {
+  if (state != 1 || paused) return;
+  paused = true;
+  for (int i = 0; i < 100 && !released; i++) vTaskDelay(pdMS_TO_TICKS(10));  // wait for the task to let go
+}
+
+void resume() {
+  if (state != 1 || !paused) return;
+  paused = false;
+  for (int i = 0; i < 100 && released; i++) vTaskDelay(pdMS_TO_TICKS(10));  // and to restart it
 }
 
 void setVolume(uint8_t v) { M5Cardputer.Speaker.setVolume(v); }
