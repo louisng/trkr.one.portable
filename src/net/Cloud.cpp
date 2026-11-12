@@ -345,6 +345,22 @@ static bool syncClock() {
   return false;
 }
 
+// Make sure the server's name can be looked up before talking to it. If the
+// network's own DNS server can't do it, fall back to public ones.
+static bool resolveHost() {
+  IPAddress ip;
+  setMsg("Finding the server...");
+  if (WiFi.hostByName(cfgHost, ip) == 1) return true;
+  WiFi.setDNS(IPAddress(1, 1, 1, 1), IPAddress(8, 8, 8, 8));
+  delay(200);
+  if (WiFi.hostByName(cfgHost, ip) == 1) return true;
+  snprintf(msg, sizeof(msg), "Can't find %s (DNS)", cfgHost);
+  IPAddress me = WiFi.localIP(), dns = WiFi.dnsIP();
+  snprintf(detailBuf, sizeof(detailBuf), "st %d ip %u.%u.%u.%u dns %u.%u.%u.%u", (int)WiFi.status(), me[0], me[1], me[2],
+           me[3], dns[0], dns[1], dns[2], dns[3]);
+  return false;
+}
+
 struct Http {
   NetworkClientSecure tls;
   HTTPClient http;
@@ -623,7 +639,7 @@ static void worker(void*) {
   midi::pauseBle();
   bleFreedKb = (uint16_t)((esp_get_free_heap_size() - before) / 1024);
   if (!hasWifi()) setMsg("Set up WiFi first");
-  else if (wifiUp() && syncClock()) {
+  else if (wifiUp() && syncClock() && resolveHost()) {
     if (job == Job::Link) ok = doLink();
     else if (job == Job::Login) ok = doLogin();
     else if (!linked()) setMsg("Link your account first");
