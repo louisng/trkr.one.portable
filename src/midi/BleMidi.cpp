@@ -51,6 +51,7 @@ static std::vector<Found> found;
 static volatile bool isScanning = false;
 
 static TaskHandle_t worker = nullptr;
+static volatile bool workerStop = false, workerAlive = false;
 static Found target;                 // device the worker should connect to
 static volatile bool connectRequested = false;
 static Found autoTarget;             // reconnected to automatically while not connected
@@ -151,6 +152,7 @@ static void workerTask(void*) {
   for (;;) {
     // Wake for a connect request, or every 10 s to retry the remembered device.
     ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(10000));
+    if (workerStop) break;
     if (!isEnabled) continue;
     if (connectRequested) {
       connectRequested = false;
@@ -159,13 +161,17 @@ static void workerTask(void*) {
                autoTarget.addr[0]) {
       doConnect(autoTarget, true);
     }
+    if (workerStop) break;
   }
+  worker = nullptr;
+  workerAlive = false;
+  vTaskDelete(nullptr);
 }
 
 void begin(const char* deviceName) {
   if (server) return;
-  remoteMtx = xSemaphoreCreateMutex();
-  foundMtx = xSemaphoreCreateMutex();
+  if (!remoteMtx) remoteMtx = xSemaphoreCreateMutex();
+  if (!foundMtx) foundMtx = xSemaphoreCreateMutex();
   BLEDevice::init(deviceName);
   BLEDevice::setMTU(128);
   server = BLEDevice::createServer();
@@ -187,7 +193,42 @@ void begin(const char* deviceName) {
   adv->setAdvertisementData(advData);
   adv->setScanResponseData(scanData);
 
+  workerStop = false;
+  workerAlive = true;
   xTaskCreatePinnedToCore(workerTask, "blecentral", 6144, nullptr, 1, &worker, 0);
+}
+
+bool shutdown() {
+  if (!server) return true;
+  const bool wasEnabled = isEnabled;
+  isEnabled = false;  // the sending side checks this first
+  if (isScanning) BLEDevice::getScan()->stop();
+  isScanning = false;
+  connectRequested = false;
+  workerStop = true;
+  if (worker) xTaskNotifyGive(worker);
+  // A connect attempt in progress can take up to ~6 s: wait for the worker to finish.
+  for (int i = 0; i < 800 && workerAlive; i++) vTaskDelay(pdMS_TO_TICKS(10));
+  if (workerAlive) {  // couldn't stop it safely: leave Bluetooth as it was
+    workerStop = false;
+    isEnabled = wasEnabled;
+    return false;
+  }
+  if (remoteMtx) xSemaphoreTake(remoteMtx, portMAX_DELAY);
+  remoteReady = false;
+  remoteChar = nullptr;
+  if (remoteMtx) xSemaphoreGive(remoteMtx);
+  if (client && client->isConnected()) client->disconnect();
+  BLEDevice::getAdvertising()->stop();
+  for (auto& peer : server->getPeerDevices(false)) server->disconnect(peer.first);
+  vTaskDelay(pdMS_TO_TICKS(150));  // let the disconnects complete
+  rstate = RemoteState::Idle;
+  pktLen = 0;
+  client = nullptr;
+  midiChar = nullptr;
+  server = nullptr;
+  BLEDevice::deinit(false);  // false: free the memory but allow init() again
+  return true;
 }
 
 void setEnabled(bool on) {

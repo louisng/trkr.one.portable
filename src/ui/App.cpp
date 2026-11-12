@@ -7,6 +7,7 @@
 #include "../input/KeyLayout.h"
 #include "../midi/BleMidi.h"
 #include "../midi/MidiOut.h"
+#include "../net/Cloud.h"
 #include "../music/Theory.h"
 #include "../play/LivePlayer.h"
 #include "../seq/Engine.h"
@@ -53,7 +54,7 @@ static bool adv = false;
 
 // Shortcut keys, looked up by key cap so they follow the layout table.
 static int8_t idxDigit[10];
-static int8_t idxB = -1, idxU = -1, idxM = -1, idxP = -1, idxS = -1, idxT = -1, idxX = -1, idxC = -1;
+static int8_t idxB = -1, idxU = -1, idxM = -1, idxP = -1, idxS = -1, idxT = -1, idxX = -1, idxC = -1, idxW = -1;
 
 static int8_t findCap(const char* cap) {
   for (uint8_t r = 0; r < layout::ROWS; r++)
@@ -183,6 +184,7 @@ static void handleMenuKey(uint8_t idx) {
   else if (idx == idxDigit[8]) switchTo(synthScreen());
   else if (idx == idxDigit[9]) switchTo(drumMidiScreen());
   else if (idx == idxC) switchTo(connectScreen());
+  else if (idx == idxW) switchTo(cloudScreen());
   else if (idx == idxB) toggleBle();
   else if (idx == idxU) toggleUsb();
   else if (idx == idxM) toggleSpeaker();
@@ -395,6 +397,7 @@ static void drawMenu() {
   canvas.setTextColor(col::TEXT);
   for (int i = 0; i < 9; i++) canvas.drawString(SCREENS[i], x + 8 + (i % 3) * 68, y + 19 + (i / 3) * 10);
   canvas.drawString(SCREENS[9], x + 8, y + 49);  // fourth row
+  canvas.drawString("w Cloud", x + 8 + 68, y + 49);
   canvas.drawString("c Connect BT", x + 8 + 2 * 68, y + 49);
 
   char buf[40];
@@ -439,6 +442,43 @@ static void render() {
   canvas.pushSprite(&M5Cardputer.Display, 0, 0);  // slow SPI transfer: outside the lock
 }
 
+// ── RAM for the cloud ────────────────────────────────────────────────────────
+// WiFi plus the secure connection need ~100 KB. While a cloud job runs the
+// speaker driver is released and the screen buffer drops to 8-bit colour
+// (32 KB instead of 64 KB); the job itself unloads Bluetooth. All of it comes
+// back afterwards, Bluetooth last.
+static bool lowColor = false;
+static bool jobMode = false;
+
+static void setLowColor(bool on) {
+  if (on == lowColor) return;
+  canvas.deleteSprite();
+  canvas.setColorDepth(on ? 8 : 16);
+  if (!canvas.createSprite(W, H)) {
+    // No room for full colour: stay in 8-bit rather than have no screen at all.
+    canvas.setColorDepth(8);
+    canvas.createSprite(W, H);
+    on = true;
+  }
+  lowColor = on;
+  dirty = true;
+}
+
+static void cloudMemoryTick() {
+  if (cloud::needsMemory() && !jobMode) {
+    jobMode = true;
+    synth::pause();
+    setLowColor(true);
+    cloud::memoryReady();  // the job's worker is created only now
+  } else if (jobMode && cloud::finishing()) {
+    setLowColor(false);
+    synth::resume();
+    jobMode = false;
+    settingsSave();  // a new login / WiFi should survive a power-off right away
+    cloud::restored();
+  }
+}
+
 void begin() {
   adv = M5.getBoard() == m5::board_t::board_M5CardputerADV;
   canvas.setColorDepth(16);
@@ -456,6 +496,7 @@ void begin() {
   idxT = findCap("t");
   idxX = findCap("x");
   idxC = findCap("c");
+  idxW = findCap("w");
   applyBtAuto();  // reconnect the remembered Bluetooth device
   layout::setUpperPiano(settings.upperPiano);
   lastBle = midi::bleState();
@@ -475,6 +516,7 @@ void tick() {
   }
 
   uint32_t now = millis();
+  cloudMemoryTick();
   watchRemote();
   midi::LinkState b = midi::bleState(), u = midi::usbState();
   if (b != lastBle || u != lastUsb) {

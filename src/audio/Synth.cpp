@@ -27,6 +27,9 @@ struct Cmd {
 
 static QueueHandle_t queue = nullptr;
 static volatile bool enabled = true;
+static volatile bool paused = false;    // asked to release the speaker
+static volatile bool released = false;  // the audio task has released it
+static uint8_t volume = 96;
 static volatile uint8_t cpuLoad = 0;
 static int16_t bufs[NBUF][BLOCK];
 
@@ -369,6 +372,26 @@ static void audioTask(void*) {
   uint8_t bi = 0;
   Cmd c;
   for (;;) {
+    if (paused) {
+      if (!released) {
+        while (xQueueReceive(queue, &c, 0) == pdTRUE) {}
+        for (auto& v : voices) v.stage = ST_OFF;
+        M5Cardputer.Speaker.end();
+        released = true;
+      }
+      vTaskDelay(pdMS_TO_TICKS(50));
+      continue;
+    }
+    if (released) {  // resumed: start the speaker again, from silence
+      if (M5Cardputer.Speaker.begin()) {
+        M5Cardputer.Speaker.setChannelVolume(SPK_CH, 255);
+        M5Cardputer.Speaker.setVolume(volume);
+        released = false;
+      } else {
+        vTaskDelay(pdMS_TO_TICKS(100));
+        continue;
+      }
+    }
     if (!enabled) {
       while (xQueueReceive(queue, &c, 0) == pdTRUE) {}
       for (auto& v : voices) v.stage = ST_OFF;
@@ -407,7 +430,20 @@ void setEnabled(bool on) {
   enabled = on;
   if (!on) M5Cardputer.Speaker.stop(SPK_CH);
 }
-void setVolume(uint8_t v) { M5Cardputer.Speaker.setVolume(v); }
+void setVolume(uint8_t v) {
+  volume = v;
+  M5Cardputer.Speaker.setVolume(v);
+}
+void pause() {
+  if (!queue || paused) return;
+  paused = true;
+  for (int i = 0; i < 100 && !released; i++) vTaskDelay(pdMS_TO_TICKS(10));  // wait for the task to let go
+}
+void resume() {
+  if (!paused) return;
+  paused = false;
+  for (int i = 0; i < 100 && released; i++) vTaskDelay(pdMS_TO_TICKS(10));  // and to restart it
+}
 void noteOn(uint8_t track, uint8_t note, uint8_t vel) { send(C_ON, track, note, vel); }
 void noteOff(uint8_t track, uint8_t note) {
   if (queue) {  // note-offs go through even while disabling, so nothing hangs

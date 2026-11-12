@@ -24,6 +24,12 @@ struct Settings {
   char btName[24] = "";
   uint8_t btAddrType = 0;
   bool btAuto = true;
+  // trkr.one: WiFi and the account token. Kept here (the settings file) so
+  // flashing a new version doesn't erase them.
+  char wifiSsid[33] = "";
+  char wifiPass[65] = "";
+  char cloudToken[64] = "";
+  char cloudEmail[64] = "";
   // New fields go at the end: older saved settings still load (the new
   // fields keep their defaults).
 };

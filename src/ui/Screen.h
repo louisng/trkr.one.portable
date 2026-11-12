@@ -59,6 +59,7 @@ Screen* arrangeScreen();
 Screen* synthScreen();
 Screen* drumMidiScreen();
 Screen* connectScreen();
+Screen* cloudScreen();
 void songsStartSaveAs();  // call before switching to songsScreen()
 Screen* setupScreen();
 Screen* keyTestScreen();
