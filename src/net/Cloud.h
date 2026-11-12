@@ -44,6 +44,11 @@ const char* email();
 const char* host();
 void unlink();
 
+// SD card file /trkr.cfg (plain text): survives re-flashing. sdMessage() says what happened.
+bool saveToSd();
+bool loadFromSd();
+const char* sdMessage();
+
 bool busy();
 void startLink();             // background: WiFi → code → wait for approval
 // background: WiFi → sign in with email + password. Only the resulting

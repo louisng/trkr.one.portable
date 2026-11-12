@@ -35,7 +35,15 @@ class CloudScreen : public Screen {
   const char* title() const override { return "CLOUD"; }
   bool musicKeys() const override { return false; }
 
-  void onEnter() override { mode = Mode::Menu; }
+  void onEnter() override {
+    mode = Mode::Menu;
+    // First visit with no WiFi saved: see whether the SD card has a trkr.cfg.
+    static bool triedSd = false;
+    if (!triedSd && !cloud::hasWifi()) {
+      triedSd = true;
+      if (cloud::loadFromSd()) toast(cloud::sdMessage());
+    }
+  }
   void onLeave() override { cloud::endScan(); }
 
   // Polls the scan so the list appears by itself.
@@ -154,29 +162,31 @@ class CloudScreen : public Screen {
     labels[2] = cloud::linked() ? "Link a different account (code)" : "...or link with a code";
     labels[3] = "Sync songs now";
     labels[4] = cloud::linked() ? "Sign out of this device" : "(not signed in)";
+    labels[5] = "Load WiFi/login from SD card";
+    labels[6] = "Save WiFi/login to SD card";
     for (int i = 0; i < ITEMS; i++) {
-      int y = 20 + i * 14;
-      if (i == sel) c.fillRect(0, y - 2, W, 13, col::SELECT);
+      int y = 18 + i * 11;
+      if (i == sel) c.fillRect(0, y - 1, W, 11, col::SELECT);
       bool off = !cloud::linked() && (i == 3 || i == 4);
       c.setTextColor(off ? col::FAINT : i == 1 && cloud::linked() ? col::OK : col::TEXT);
       c.drawString(labels[i], 8, y);
     }
     c.setTextColor(cloud::state() == cloud::State::Failed ? col::DRUM
                    : cloud::busy() ? col::ACCENT : col::OK);
-    c.drawString(cloud::message(), 8, 92);
+    c.drawString(cloud::message(), 8, 97);
     c.setTextColor(col::DIM);
     if (cloud::detail()[0]) {
-      c.drawString(cloud::detail(), 8, 104);
+      c.drawString(cloud::detail(), 8, 108);
     } else if (cloud::lastSyncMs()) {
       snprintf(buf, sizeof(buf), "last sync %lus ago", (unsigned long)((millis() - cloud::lastSyncMs()) / 1000));
-      c.drawString(buf, 8, 104);
+      c.drawString(buf, 8, 108);
     }
-    c.drawString(cloud::busy() ? "enter = cancel" : ";. move  enter choose  h memory", 8, H - 14);
+    c.drawString(cloud::busy() ? "enter = cancel" : ";. move  enter choose  h memory", 8, H - 10);
   }
 
  private:
   enum class Mode : uint8_t { Menu, Ssid, Pass, Email, LoginPass, Scan, Heap };
-  static constexpr int ITEMS = 5;
+  static constexpr int ITEMS = 7;
   Mode mode = Mode::Menu;
   int sel = 0;
   char field[65] = "";
@@ -383,6 +393,14 @@ class CloudScreen : public Screen {
         break;
       case 4:
         if (cloud::linked()) { cloud::unlink(); toast("Signed out"); }
+        break;
+      case 5:
+        cloud::loadFromSd();
+        toast(cloud::sdMessage());
+        break;
+      case 6:
+        cloud::saveToSd();
+        toast(cloud::sdMessage());
         break;
     }
   }

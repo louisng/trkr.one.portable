@@ -7,6 +7,8 @@
 #include <LittleFS.h>
 #include <NetworkClientSecure.h>
 #include <Preferences.h>
+#include <SD.h>
+#include <SPI.h>
 #include <esp_heap_caps.h>
 #include <WiFi.h>
 #include <string.h>
@@ -158,6 +160,79 @@ void unlink() {
   savePref("email", "");
 }
 
+// ── SD card: keep WiFi and login across re-flashing ──────────────────────────
+// A plain text file, /trkr.cfg, one "key=value" per line:
+//   wifi_ssid, wifi_pass, email, token, password
+// "token" is what a sign-in produces; "password" (optional, you can add it
+// by hand on a computer) makes a fresh sign-in happen by itself on load.
+static char sdMsg[48] = "";
+const char* sdMessage() { return sdMsg; }
+
+static bool sdOpen() {
+  SPI.begin(40, 39, 14, 12);  // Cardputer SD slot: SCK MISO MOSI CS
+  if (SD.begin(12, SPI, 20000000)) return true;
+  strcpy(sdMsg, "No SD card found");
+  return false;
+}
+
+bool saveToSd() {
+  if (!sdOpen()) return false;
+  SD.remove("/trkr.cfg");
+  File f = SD.open("/trkr.cfg", FILE_WRITE);
+  if (!f) {
+    SD.end();
+    strcpy(sdMsg, "Can't write to SD");
+    return false;
+  }
+  f.printf("wifi_ssid=%s\n", cfgSsid);
+  f.printf("wifi_pass=%s\n", cfgPass);
+  if (cfgEmail[0]) f.printf("email=%s\n", cfgEmail);
+  if (cfgToken[0]) f.printf("token=%s\n", cfgToken);
+  f.close();
+  SD.end();
+  strcpy(sdMsg, "Saved to SD: trkr.cfg");
+  return true;
+}
+
+bool loadFromSd() {
+  if (!sdOpen()) return false;
+  File f = SD.open("/trkr.cfg", FILE_READ);
+  if (!f) {
+    SD.end();
+    strcpy(sdMsg, "No trkr.cfg on the SD card");
+    return false;
+  }
+  char ssid[33] = "", pass[65] = "", em[64] = "", tok[64] = "", pw[72] = "";
+  while (f.available()) {
+    String line = f.readStringUntil('\n');
+    line.trim();
+    int eq = line.indexOf('=');
+    if (eq <= 0) continue;
+    String k = line.substring(0, eq), v = line.substring(eq + 1);
+    if (k == "wifi_ssid") strncpy(ssid, v.c_str(), sizeof(ssid) - 1);
+    else if (k == "wifi_pass") strncpy(pass, v.c_str(), sizeof(pass) - 1);
+    else if (k == "email") strncpy(em, v.c_str(), sizeof(em) - 1);
+    else if (k == "token") strncpy(tok, v.c_str(), sizeof(tok) - 1);
+    else if (k == "password") strncpy(pw, v.c_str(), sizeof(pw) - 1);
+  }
+  f.close();
+  SD.end();
+  int got = 0;
+  if (ssid[0]) { setWifi(ssid, pass); got |= 1; }
+  if (tok[0]) {
+    strncpy(cfgToken, tok, sizeof(cfgToken) - 1);
+    savePref("token", cfgToken);
+    if (em[0]) { strncpy(cfgEmail, em, sizeof(cfgEmail) - 1); savePref("email", cfgEmail); }
+    got |= 2;
+  }
+  bool signIn = !tok[0] && em[0] && pw[0] && ssid[0];
+  if (signIn) { startLogin(em, pw); got |= 4; }
+  memset(pw, 0, sizeof(pw));
+  snprintf(sdMsg, sizeof(sdMsg), got ? "Loaded from SD:%s%s%s" : "trkr.cfg had nothing usable",
+           (got & 1) ? " wifi" : "", (got & 2) ? " login" : "", (got & 4) ? " signing in" : "");
+  return got != 0;
+}
+
 // ── HTTP helpers ─────────────────────────────────────────────────────────────
 static volatile uint8_t lastReason = 0;  // why the radio last dropped or refused us
 
@@ -282,7 +357,16 @@ struct Http {
   void note(int rc) {
     char eb[96] = "";
     int e = tls.lastError(eb, sizeof(eb));
-    snprintf(detailBuf, sizeof(detailBuf), "http %d tls %d %.36s", rc, e, eb);
+    // Which step broke? Look the name up, then try a plain connection.
+    IPAddress ip;
+    bool dns = WiFi.hostByName(cfgHost, ip) == 1;
+    bool tcp = false;
+    if (dns) {
+      WiFiClient plain;
+      tcp = plain.connect(ip, 443, 6000);
+      plain.stop();
+    }
+    snprintf(detailBuf, sizeof(detailBuf), "dns %s tcp %s tls %d", dns ? "ok" : "FAIL", dns ? (tcp ? "ok" : "FAIL") : "-", e);
   }
   bool open(const String& path, bool auth) {
     String u = String("https://") + cfgHost + path;
