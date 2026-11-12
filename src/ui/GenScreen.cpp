@@ -190,7 +190,9 @@ class GenScreen : public Screen {
       c.setTextColor(col::DIM);
       if (genmode::lowMemory()) {
         c.setTextColor(col::DRUM);
-        c.drawString("not enough free memory", 6, 38);
+        char lm[40];
+        snprintf(lm, sizeof(lm), "low memory: %d KB free, need 70", genmode::freeHeapKb());
+        c.drawString(lm, 6, 38);
       } else {
         c.drawString(genmode::running() ? "building..." : "space = play   enter = new song", 6, 38);
       }

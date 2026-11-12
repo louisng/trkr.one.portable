@@ -5,6 +5,7 @@
 #include <LittleFS.h>
 #include <NetworkClientSecure.h>
 #include <Preferences.h>
+#include <esp_heap_caps.h>
 #include <WiFi.h>
 #include <string.h>
 
@@ -442,7 +443,15 @@ static void start(Job j) {
   cancelReq = false;
   if (j != Job::Login) memset(loginPass, 0, sizeof(loginPass));
   // TLS needs a deep stack.
-  xTaskCreatePinnedToCore(worker, "cloud", 12288, nullptr, 1, &task, 0);
+  st = State::Connecting;
+  setMsg("Starting...");
+  if (xTaskCreatePinnedToCore(worker, "cloud", 12288, nullptr, 1, &task, 0) != pdPASS) {
+    task = nullptr;
+    st = State::Failed;
+    memset(loginPass, 0, sizeof(loginPass));
+    snprintf(msg, sizeof(msg), "No memory: %uK free, %uK block", (unsigned)(esp_get_free_heap_size() / 1024),
+             (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) / 1024));
+  }
 }
 
 void startLink() { start(Job::Link); }

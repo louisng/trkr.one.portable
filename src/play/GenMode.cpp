@@ -178,6 +178,10 @@ static constexpr uint32_t MIN_FREE_BYTES = 70000;
 
 static bool startPlayback() {
   if (producerAlive) return false;  // a previous generator task hasn't finished stopping
+  // The previous song's generator task and patterns are freed a moment after
+  // they stop (the idle task releases a deleted task's stack), so give the
+  // heap a short while to settle before deciding there is too little.
+  for (int i = 0; i < 20 && esp_get_free_heap_size() < MIN_FREE_BYTES; i++) vTaskDelay(25 / portTICK_PERIOD_MS);
   if (esp_get_free_heap_size() < MIN_FREE_BYTES) {
     lowMem = true;
     return false;

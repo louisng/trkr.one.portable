@@ -43,13 +43,15 @@ class CloudScreen : public Screen {
   }
 
   void onRawKey(uint8_t idx, bool pressed) override {
-    if (mode == Mode::Menu || mode == Mode::Scan || !pressed) return;
+    if (!pressed) { eatEnter = false; return; }
+    if (mode == Mode::Menu || mode == Mode::Scan) return;
     const char* cap = layout::keyCapLabel(idx / layout::COLS, idx % layout::COLS);
     if (strcmp(cap, "del") == 0) {
       size_t n = strlen(field);
       if (n) field[n - 1] = 0;
     } else if (strcmp(cap, "ent") == 0) {
       confirmField();
+      eatEnter = true;  // this same key press must not also act on the menu
     } else if (strcmp(cap, "spc") == 0) {
       append(' ');
     } else if (strlen(cap) == 1 && cap[0] != '`') {
@@ -59,6 +61,10 @@ class CloudScreen : public Screen {
   }
 
   void onAction(uint8_t a) override {
+    if (a == layout::ACT_ENTER && eatEnter) {  // already used to confirm a typed field
+      eatEnter = false;
+      return;
+    }
     if (mode == Mode::Scan) {
       scanAction(a);
       markDirty();
@@ -156,6 +162,7 @@ class CloudScreen : public Screen {
   char newEmail[64] = "";
   int scanSel = 0;
   bool scanWas = false;
+  bool eatEnter = false;
 
   // ── WiFi network list ──
   // Rows: every network found, then "Other network..." for one that is hidden.
