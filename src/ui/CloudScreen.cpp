@@ -126,7 +126,8 @@ class CloudScreen : public Screen {
     char buf[48];
     const char* labels[ITEMS];
     char l0[40], l1[40];
-    snprintf(l0, sizeof(l0), "WiFi: %s", cloud::hasWifi() ? cloud::ssid() : "set up...");
+    if (cloud::hasWifi()) snprintf(l0, sizeof(l0), "WiFi: %.20s (%d chars)", cloud::ssid(), cloud::passLen());
+    else snprintf(l0, sizeof(l0), "WiFi: set up...");
     snprintf(l1, sizeof(l1), "%s", cloud::linked() ? cloud::email() : "Sign in with email");
     labels[0] = l0;
     labels[1] = l1;

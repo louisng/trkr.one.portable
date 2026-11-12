@@ -178,6 +178,10 @@ static constexpr uint32_t MIN_FREE_BYTES = 70000;
 
 static bool startPlayback() {
   if (producerAlive) return false;  // a previous generator task hasn't finished stopping
+  // Let go of the old song first: the patterns waiting in the queue and the
+  // old song's header are what hold most of the memory while it plays.
+  qClear();
+  seq::current() = song::Song();
   // The previous song's generator task and patterns are freed a moment after
   // they stop (the idle task releases a deleted task's stack), so give the
   // heap a short while to settle before deciding there is too little.

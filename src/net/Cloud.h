@@ -27,6 +27,7 @@ const char* linkUrl();        // while Linking: where to type it
 
 bool hasWifi();               // credentials saved
 const char* ssid();
+int passLen();                // length of the saved password (to check it was typed right)
 void setWifi(const char* ssid, const char* pass);
 
 // Scan for networks (runs in the background; poll scanning()).

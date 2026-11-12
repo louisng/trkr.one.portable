@@ -67,6 +67,7 @@ const char* linkCode() { return code; }
 const char* linkUrl() { return url; }
 bool hasWifi() { return cfgSsid[0] != 0; }
 const char* ssid() { return cfgSsid; }
+int passLen() { return (int)strlen(cfgPass); }
 bool linked() { return cfgToken[0] != 0; }
 const char* email() { return cfgEmail; }
 const char* host() { return cfgHost; }
@@ -148,17 +149,41 @@ void unlink() {
 }
 
 // ── HTTP helpers ─────────────────────────────────────────────────────────────
+static volatile uint8_t lastReason = 0;  // why the radio last dropped or refused us
+
+static void onWifiEvent(arduino_event_id_t, arduino_event_info_t info) {
+  lastReason = info.wifi_sta_disconnected.reason;
+}
+
+static const char* reasonText(uint8_t r) {
+  switch (r) {
+    case 201: return "network not found";
+    case 202: case 15: case 204: case 2: return "wrong password?";
+    case 205: return "connect failed";
+    case 203: return "assoc failed";
+    case 8: case 3: return "dropped by router";
+    default: return "no answer";
+  }
+}
+
 static bool wifiUp() {
   if (WiFi.status() == WL_CONNECTED) return true;
+  static bool hooked = false;
+  if (!hooked) {
+    WiFi.onEvent(onWifiEvent, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+    hooked = true;
+  }
+  lastReason = 0;
   st = State::Connecting;
   setMsg("Joining WiFi...");
   WiFi.mode(WIFI_STA);
+  WiFi.setSleep(false);
   WiFi.begin(cfgSsid, cfgPass);
   uint32_t t0 = millis();
   while (WiFi.status() != WL_CONNECTED) {
     if (cancelReq) return false;
     if (millis() - t0 > 20000) {
-      setMsg("WiFi: couldn't connect");
+      snprintf(msg, sizeof(msg), "WiFi: %s (%u)", reasonText(lastReason), (unsigned)lastReason);
       return false;
     }
     delay(200);
