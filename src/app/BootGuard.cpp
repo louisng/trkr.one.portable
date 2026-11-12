@@ -1,5 +1,7 @@
 #include "BootGuard.h"
 
+#include <esp_heap_caps.h>
+
 #include <M5Cardputer.h>
 #include <esp_attr.h>
 #include <esp_system.h>
@@ -78,12 +80,17 @@ void begin() {
   }
   rtcStage = ST_NONE;
 
-  M5Cardputer.Display.setRotation(1);
+  // Rotation is chosen in main.cpp (setLandscape) before this runs; forcing
+  // rotation 1 here put the ADV back into portrait.
   drawHeader();
 }
 
+static uint32_t heapMarks[ST_COUNT] = {0};
+uint32_t heapAt(Stage s) { return s < ST_COUNT ? heapMarks[s] : 0; }
+
 void stage(Stage s) {
   rtcStage = s;
+  if (s < ST_COUNT) heapMarks[s] = esp_get_free_heap_size();
 #ifdef BOOT_DEBUG
   Serial.printf("[boot] step: %s%s\n", stageName(s), skipped(s) ? " (skipped)" : "");
   Serial.flush();

@@ -15,6 +15,7 @@
 #include "../input/KeyInput.h"
 #include "../input/KeyLayout.h"
 #include "../play/LivePlayer.h"
+#include "../play/GenMode.h"
 #include "../seq/Engine.h"
 #include "Screen.h"
 
@@ -224,6 +225,7 @@ class SongsScreen : public Screen {
     switch (what) {
       case P_NEW:
         stopEverything();
+        genmode::stop();  // a generated song would be swapped over the one you open
         songNew();
         remember("");
         toast("New empty song");
@@ -231,6 +233,7 @@ class SongsScreen : public Screen {
       case P_LOAD: {
         String n = selName();
         stopEverything();
+        genmode::stop();
         if (songLoadNamed(n.c_str(), store)) {
           remember(n.c_str());
           snprintf(msg, sizeof(msg), "Loaded %s", n.c_str());

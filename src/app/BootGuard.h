@@ -25,6 +25,7 @@ void begin();               // call right after M5Cardputer.begin()
 void stage(Stage s);        // record + show "starting <step>"
 bool skipped(Stage s);      // true if this step crashed last time and is skipped
 const char* stageName(Stage s);
+uint32_t heapAt(Stage s);   // free heap (bytes) when that step began / when startup finished
 bool crashedLastBoot();
 Stage crashedStage();
 const char* resetReasonText();

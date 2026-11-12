@@ -24,6 +24,15 @@ struct Settings {
   char btName[24] = "";
   uint8_t btAddrType = 0;
   bool btAuto = true;
+  // trkr.one: WiFi and the account token. Kept here (the settings file) so
+  // flashing a new version doesn't erase them.
+  char wifiSsid[33] = "";
+  char wifiPass[65] = "";
+  char cloudToken[64] = "";
+  char cloudEmail[64] = "";
+  // Generated mode
+  uint8_t genGenre = 0;    // genre for the next songs
+  uint8_t genAlong = 1;    // play-along filter: 0 free, 1 chord tones, 2 snap to chord, 3 scale
   // New fields go at the end: older saved settings still load (the new
   // fields keep their defaults).
 };

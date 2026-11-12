@@ -12,6 +12,9 @@ namespace synth {
 void begin();
 void setEnabled(bool on);  // the "speaker" setting
 void setVolume(uint8_t v); // 0-255
+// Release the speaker driver (frees RAM) while WiFi/TLS runs, then restart it.
+void pause();
+void resume();
 
 void noteOn(uint8_t track, uint8_t note, uint8_t vel);
 void noteOff(uint8_t track, uint8_t note);

@@ -98,6 +98,9 @@ int pianoNoteFor(uint8_t semitone) {
   return (n >= 0 && n <= 127) ? n : -1;
 }
 
+static NoteFilter noteFilter = nullptr;
+void setNoteFilter(NoteFilter f) { noteFilter = f; }
+
 static void press(uint8_t k, const layout::KeyDef& def) {
   Held& h = held[k];
   if (h.channel) return;  // already sounding
@@ -107,7 +110,8 @@ static void press(uint8_t k, const layout::KeyDef& def) {
   switch (def.role) {
     case Role::Piano: {
       int n = pianoNoteFor(def.value);
-      if (n < 0) return;
+      if (n >= 0 && noteFilter) n = noteFilter(n);
+      if (n < 0 || n > 127) return;
       h = {seq::song.tracks[synthTrack].channel, synthTrack, 1, {(uint8_t)n}};
       startNote(h.track, h.channel, (uint8_t)n, false, 0);
       theory::formatNote((uint8_t)n, last);

@@ -11,6 +11,9 @@ namespace blemidi {
 
 void begin(const char* deviceName);  // initialises the stack, does not advertise
 void setEnabled(bool on);            // start/stop advertising, drop connections
+// Unload the whole stack to free RAM (WiFi needs it); begin() brings it back.
+// Returns false if it could not be stopped safely (then nothing changed).
+bool shutdown();
 bool enabled();
 bool connected();                    // anything to send to (either role)
 void send(uint8_t status, uint8_t d1, uint8_t d2);

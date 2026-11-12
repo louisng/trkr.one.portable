@@ -7,6 +7,8 @@
 #include "../input/KeyLayout.h"
 #include "../midi/BleMidi.h"
 #include "../midi/MidiOut.h"
+#include "../net/Cloud.h"
+#include "../play/GenMode.h"
 #include "../music/Theory.h"
 #include "../play/LivePlayer.h"
 #include "../seq/Engine.h"
@@ -53,7 +55,7 @@ static bool adv = false;
 
 // Shortcut keys, looked up by key cap so they follow the layout table.
 static int8_t idxDigit[10];
-static int8_t idxB = -1, idxU = -1, idxM = -1, idxP = -1, idxS = -1, idxT = -1, idxX = -1, idxC = -1;
+static int8_t idxB = -1, idxU = -1, idxM = -1, idxP = -1, idxS = -1, idxT = -1, idxX = -1, idxC = -1, idxW = -1, idxG = -1;
 
 static int8_t findCap(const char* cap) {
   for (uint8_t r = 0; r < layout::ROWS; r++)
@@ -102,6 +104,7 @@ static void toggleBle() {
   midi::setBleEnabled(settings.bleMidi);
   applyBtAuto();
   toast(settings.bleMidi ? "Bluetooth MIDI on" : "Bluetooth MIDI off");
+  bleSettingChanged();
 }
 
 // Notices connections made / lost / failed on the Connect screen (or by
@@ -183,6 +186,8 @@ static void handleMenuKey(uint8_t idx) {
   else if (idx == idxDigit[8]) switchTo(synthScreen());
   else if (idx == idxDigit[9]) switchTo(drumMidiScreen());
   else if (idx == idxC) switchTo(connectScreen());
+  else if (idx == idxW) switchTo(cloudScreen());
+  else if (idx == idxG) switchTo(genScreen());
   else if (idx == idxB) toggleBle();
   else if (idx == idxU) toggleUsb();
   else if (idx == idxM) toggleSpeaker();
@@ -297,6 +302,8 @@ static void handleEvent(const keys::Event& e) {
     return;
   }
 
+  if (current->consumeKey(e.index, e.pressed)) return;
+
   if (e.pressed && isAction && def.value == layout::ACT_PLAY && current->spaceIsPlay()) {
     handleTransport(def.value);
     return;
@@ -395,11 +402,13 @@ static void drawMenu() {
   canvas.setTextColor(col::TEXT);
   for (int i = 0; i < 9; i++) canvas.drawString(SCREENS[i], x + 8 + (i % 3) * 68, y + 19 + (i / 3) * 10);
   canvas.drawString(SCREENS[9], x + 8, y + 49);  // fourth row
+  canvas.drawString("w Cloud", x + 8 + 68, y + 49);
   canvas.drawString("c Connect BT", x + 8 + 2 * 68, y + 49);
 
   char buf[40];
-  snprintf(buf, sizeof(buf), "s Save %s", seq::currentSongName()[0] ? seq::currentSongName() : "as...");
+  snprintf(buf, sizeof(buf), "s Save %.9s", seq::currentSongName()[0] ? seq::currentSongName() : "as...");
   canvas.drawString(buf, x + 8, y + 61);
+  canvas.drawString("g Generate", x + 110, y + 61);
   snprintf(buf, sizeof(buf), "b BLE: %s", settings.bleMidi ? "ON" : "off");
   canvas.drawString(buf, x + 8, y + 72);
   snprintf(buf, sizeof(buf), "u USB: %s", settings.usbMidi ? "ON" : "off");
@@ -439,6 +448,133 @@ static void render() {
   canvas.pushSprite(&M5Cardputer.Display, 0, 0);  // slow SPI transfer: outside the lock
 }
 
+// ── RAM for the cloud ────────────────────────────────────────────────────────
+// WiFi plus the secure connection need ~100 KB. While a cloud job runs the
+// speaker driver is released and the screen buffer drops to 8-bit colour
+// (32 KB instead of 64 KB); the job itself unloads Bluetooth. All of it comes
+// back afterwards, Bluetooth last.
+static bool lowColor = false;
+static bool jobMode = false;
+
+static uint32_t colorRetryAt = 0;  // after a failed return to full colour, wait before trying again
+
+static void setLowColor(bool on) {
+  if (on == lowColor) return;
+  canvas.deleteSprite();
+  canvas.setColorDepth(on ? 8 : 16);
+  if (!canvas.createSprite(W, H)) {
+    // No room for full colour: stay in 8-bit rather than have no screen at all.
+    canvas.setColorDepth(8);
+    canvas.createSprite(W, H);
+    on = true;
+    colorRetryAt = millis() + 3000;
+  }
+  lowColor = on;
+  dirty = true;
+}
+
+// Generated mode builds the next song while one plays: that needs the RAM the
+// 16-bit screen buffer holds, so the screen runs in 8-bit colour meanwhile.
+// Generated mode plays through the built-in speaker OR through MIDI, not both,
+// and what the other way needs is released to make room (decided when it starts):
+//   a MIDI device is connected -> the speaker driver is released (~18 KB);
+//                                 Bluetooth stays only if that device is on Bluetooth
+//   nothing connected          -> the speaker plays; Bluetooth is unloaded (~56 KB)
+// Unloading Bluetooth can take a moment (it waits for the connect-out worker), so it
+// happens on a small task, never in the UI loop.
+static bool genLatched = false, genSynthOff = false;
+static volatile int genBle = 0;  // 0 loaded, 1 unloading, 2 unloaded
+static uint32_t genStoppedAt = 0;
+static char genNote[40] = "";
+static void bleUnloadTask(void*) {
+  midi::pauseBle();
+  genBle = 2;
+  vTaskDelete(nullptr);
+}
+const char* genOutputNote() { return genNote; }
+
+// Bluetooth MIDI was switched on while Generated mode runs with Bluetooth unloaded
+// (to make room): there is no stack to switch on. Restart Generated mode, which decides
+// again with Bluetooth wanted: Bluetooth stays loaded and the speaker is released instead.
+// (Reloading Bluetooth in the middle of a song build could run out of memory.)
+void bleSettingChanged() {
+  if (!genmode::running() || !settings.bleMidi || genBle == 0 || jobMode) return;
+  for (int i = 0; i < 200 && genBle == 1; i++) vTaskDelay(pdMS_TO_TICKS(10));  // an unload still in progress
+  if (genBle != 2) return;
+  genmode::stop();
+  if (genSynthOff) {
+    synth::resume();
+    genSynthOff = false;
+  }
+  midi::resumeBle();
+  midi::setBleEnabled(settings.bleMidi);  // it comes back in the state it was unloaded in: apply the setting
+  applyBtAuto();
+  genBle = 0;
+  genLatched = false;  // the next tick decides again, with Bluetooth wanted
+  genNote[0] = 0;
+  genmode::start();
+  toast("Bluetooth on: restarting Generated mode");
+}
+
+static void genColorTick() {
+  if (jobMode) return;  // a cloud job decides the colour depth, the speaker and Bluetooth
+  const bool want = genmode::running();
+  if (want != lowColor && (int32_t)(millis() - colorRetryAt) >= 0) setLowColor(want);
+
+  if (want && !genLatched) {  // Generated mode just started: decide what to switch off
+    genLatched = true;
+    genStoppedAt = 0;
+    // Bluetooth stays if it is switched on (even if nothing has connected yet) or connected:
+    // that is how the songs get to a better-sounding device.
+    const bool bleKeep = settings.bleMidi || midi::bleState() == midi::LinkState::Connected;
+    const bool usbConn = midi::usbState() == midi::LinkState::Connected;
+    const bool midiOut = bleKeep || usbConn;
+    genSynthOff = midiOut || !settings.speaker;
+    if (genSynthOff) synth::pause();
+    if (!bleKeep && genBle == 0) {
+      genBle = 1;
+      if (xTaskCreatePinnedToCore(bleUnloadTask, "bleoff", 8192, nullptr, 1, nullptr, 0) != pdPASS) genBle = 0;
+    }
+    if (bleKeep) snprintf(genNote, sizeof(genNote), "MIDI out: speaker off");
+    else if (usbConn) snprintf(genNote, sizeof(genNote), "USB MIDI: speaker, Bluetooth off");
+    else if (settings.speaker) snprintf(genNote, sizeof(genNote), "speaker: Bluetooth off (fn+b = MIDI)");
+    else snprintf(genNote, sizeof(genNote), "no sound: speaker and MIDI off");
+  } else if (!want && genLatched) {  // switched off: give things back
+    if (genSynthOff) synth::resume();
+    genSynthOff = false;
+    genLatched = false;
+    genNote[0] = 0;
+  }
+  // Bluetooth comes back once the screen is back to full colour (the screen needs one big
+  // block of memory, so Bluetooth goes last), or after 8 s regardless.
+  if (!want && genBle == 2) {
+    if (!genStoppedAt) genStoppedAt = millis();
+    if (!lowColor || millis() - genStoppedAt > 8000) {
+      midi::resumeBle();
+      midi::setBleEnabled(settings.bleMidi);  // (as above: the setting may have changed meanwhile)
+      applyBtAuto();
+      genBle = 0;
+      genStoppedAt = 0;
+    }
+  }
+}
+
+static void cloudMemoryTick() {
+  if (cloud::needsMemory() && !jobMode) {
+    jobMode = true;
+    if (genmode::running()) genmode::stop();  // its song building needs the same memory
+    synth::pause();
+    setLowColor(true);
+    cloud::memoryReady();  // the job's worker is created only now
+  } else if (jobMode && cloud::finishing()) {
+    setLowColor(false);
+    synth::resume();
+    jobMode = false;
+    settingsSave();  // a new login / WiFi should survive a power-off right away
+    cloud::restored();
+  }
+}
+
 void begin() {
   adv = M5.getBoard() == m5::board_t::board_M5CardputerADV;
   canvas.setColorDepth(16);
@@ -456,6 +592,8 @@ void begin() {
   idxT = findCap("t");
   idxX = findCap("x");
   idxC = findCap("c");
+  idxW = findCap("w");
+  idxG = findCap("g");
   applyBtAuto();  // reconnect the remembered Bluetooth device
   layout::setUpperPiano(settings.upperPiano);
   lastBle = midi::bleState();
@@ -475,6 +613,9 @@ void tick() {
   }
 
   uint32_t now = millis();
+  cloudMemoryTick();
+  genColorTick();
+  genmode::tick();
   watchRemote();
   midi::LinkState b = midi::bleState(), u = midi::usbState();
   if (b != lastBle || u != lastUsb) {

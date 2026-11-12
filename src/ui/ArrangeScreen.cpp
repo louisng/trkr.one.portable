@@ -111,7 +111,7 @@ class ArrangeScreen : public Screen {
         char pats[TRACKS * 2 + 1];
         for (uint8_t t = 0; t < TRACKS; t++) {
           uint8_t pt = song.scenes[sc].pattern[t];
-          pats[t * 2] = pt < PATTERNS ? (char)('1' + pt) : '-';
+          pats[t * 2] = patternChar(pt);
           pats[t * 2 + 1] = ' ';
         }
         pats[TRACKS * 2] = 0;

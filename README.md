@@ -165,6 +165,57 @@ classic tracker layout: `q w e r t y u i o p [ ] \` are white keys (C up to A) a
     after a restart. **Disconnect** stops that until the next power-on.
   - Phones / computers can still connect to the Cardputer at the same time; MIDI goes to
     everything connected, and the BLE light shows green if anything is.
+- **Generate** (hold `` ` `` + `g`): endless songs made on the device by the same generator as
+  trkr.one (the same seed makes the same song on both), in the genre you pick.
+  - `,` `/` genre · `space` start / pause · `enter` a new song now · `del` switch it off.
+  - Each song is an ordinary song (scenes + arrangement), so everything works on it: `fn` +
+    `1`…`8` mutes a part, the built-in synth and every track's MIDI channel apply, and
+    `fn` + `s` saves it (it asks for a name, it never overwrites the song you had open). It
+    can be edited on the Step / Tracker screens and synced like any other song.
+  - While one song plays the next is built in the background and swapped in exactly when the
+    arrangement starts over. Mutes, and channels you changed, carry over to the next song.
+  - **Play along:** the piano keys follow the song's chord. `;` `.` choose the rule: chord tones
+    only, snapped to the chord, the scale that fits it, or any note.
+  - **Speaker or MIDI, not both.** Building songs needs RAM, so Generated mode releases what the
+    way you are playing doesn't use, and gives it back when you switch it off: with a MIDI device
+    connected the built-in speaker is released (Bluetooth too, unless the device is on
+    Bluetooth); with nothing connected the speaker plays and Bluetooth is unloaded (so you can't
+    connect a Bluetooth device while it runs). The screen also drops to 8-bit colour. The screen
+    says what was switched off. It stops itself when you open a song or start a cloud job.
+  - Each genre needs a different amount of free RAM (Disco the most, about 61 KB, Ambient the
+    least, about 13 KB); the screen shows what the chosen genre needs if there isn't enough.
+    When there isn't room to build the next song beside the playing one, the playing song is
+    freed first and there is a short gap.
+- **Generate** (hold `` ` `` + `g`): endless songs made on the device by the same generator as
+  trkr.one (the same seed makes the same song on both), in the genre you pick.
+  - `,` `/` genre · `space` start / pause · `enter` a new song now · `del` switch it off.
+  - Each song is an ordinary song (scenes + arrangement), so everything works on it: `fn` +
+    `1`…`8` mutes a part, the built-in synth and every track's MIDI channel apply, and
+    `fn` + `s` saves it (it asks for a name, it never overwrites the song you had open). It
+    can be edited on the Step / Tracker screens and synced like any other song.
+  - While one song plays the next is built in the background and swapped in exactly when the
+    arrangement starts over. Mutes, and channels you changed, carry over to the next song.
+  - **Play along:** the piano keys follow the song's chord. `;` `.` choose the rule: chord tones
+    only, snapped to the chord, the scale that fits it, or any note.
+  - While it runs the screen drops to 8-bit colour (the next song needs the RAM) and returns to
+    full colour when you switch it off. It stops itself when you open a song or start a cloud job.
+- **Cloud** (hold `` ` `` + `w`): WiFi and [trkr.one](https://trkr.one) song sync.
+  - *WiFi:* choose a network from the scan (`space` rescans; "Other network" is for a hidden
+    one). WiFi and your login are kept in the settings file, so flashing doesn't erase them.
+  - *Sign in:* with your email and password, or "link with a code": type the shown code at
+    trkr.one/link while signed in. Only a token is kept, never your password.
+  - *Sync songs now:* songs you made on the website come down, songs made on the device go up
+    and the website title is kept. Change a song on one side and it follows; change it on
+    **both** and nothing is lost: your device copy goes up as a new song ("... (device)") and
+    the website's version comes down as a separate copy. A song you delete on the device stays
+    online and isn't fetched again unless it changes there. Songs with no notes aren't sent.
+  - Website songs are converted to the device's own format (scenes + arrangement). The device
+    keeps up to **24 patterns per track**; a song with more different bits of music on one track
+    than that is skipped and reported ("too big"). Swing, key, instrument names and track names
+    the device doesn't use are kept aside and sent back unchanged.
+  - A job frees RAM first: the speaker driver is released, the screen drops to 8-bit colour and
+    Bluetooth is unloaded; all of it comes back afterwards. `h` on the Cloud screen shows where
+    memory goes.
 - **Songs:** the saved songs, sorted by name, with the open one in yellow.
   `;`/`.` pick, `enter` loads, `s` saves the open song over the selected one, `del` deletes;
   each asks for a second press to confirm. `'` switches between the **FLASH** and

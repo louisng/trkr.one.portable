@@ -118,6 +118,7 @@ class SetupScreen : public Screen {
         settings.bleMidi = !settings.bleMidi;
         midi::setBleEnabled(settings.bleMidi);
         applyBtAuto();
+        bleSettingChanged();
         break;
       case IT_USB:
         settings.usbMidi = !settings.usbMidi;

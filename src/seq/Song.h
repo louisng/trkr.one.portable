@@ -13,7 +13,8 @@
 namespace seq {
 
 static constexpr uint8_t TRACKS = 8;
-static constexpr uint8_t PATTERNS = 8;          // per track
+static constexpr uint8_t PATTERNS = 24;         // per track (the file format kept 8 before v7)
+static constexpr uint8_t LEGACY_PATTERNS = 8;   // songs saved by older versions hold 8 per track
 static constexpr uint8_t MAX_STEPS = 128;        // 8 bars
 static constexpr uint8_t MAX_NOTES_PER_STEP = 4;
 static constexpr uint8_t TICKS_PER_STEP = 12;   // 48 PPQN
@@ -125,6 +126,11 @@ static constexpr uint8_t SCENES = 99;
 static constexpr uint8_t ARRANGE_MAX = 128;
 static constexpr uint8_t SCENE_SILENT = 0xFF;
 
+// One character for a pattern number: 1-9, then A, B, C ... ('-' if none).
+inline char patternChar(uint8_t pt) {
+  return pt < 9 ? (char)('1' + pt) : pt < PATTERNS ? (char)('A' + (pt - 9)) : '-';
+}
+
 struct Scene {
   uint8_t pattern[TRACKS];  // 0-7, or SCENE_SILENT
 };
@@ -140,6 +146,7 @@ struct Song {
 extern Song song;
 
 void songInit();  // default tracks, empty patterns
+void songInitInto(Song& s);  // the same for a song held in its own object
 
 // ── Editing helpers (call with the engine lock held) ─────────────────────────
 // Count / collect the notes starting on a step.
@@ -194,6 +201,13 @@ bool songSaveAs(const char* name, Storage st = Storage::Flash);
 bool songLoadNamed(const char* name, Storage st = Storage::Flash);
 bool songDelete(const char* name, Storage st = Storage::Flash);
 bool songCopy(const char* name, Storage from, Storage to);
+// For the cloud sync: read / write a song in its own object (same file format),
+// leaving the open song alone. Flash or SD, by name.
+bool songSaveCopy(const char* name, const Song& s, Storage st = Storage::Flash);
+bool songLoadCopy(const char* name, Song& out, Storage st = Storage::Flash);
+// The open song no longer belongs to a saved file (so saving asks for a name
+// instead of overwriting the old one). Used when a song is generated.
+void songForgetName();
 void songNew();
 std::vector<String> songList(Storage st = Storage::Flash);  // sorted names
 

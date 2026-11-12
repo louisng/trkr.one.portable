@@ -53,8 +53,8 @@ class ScenesScreen : public Screen {
       case layout::ACT_DELETE: pt = SCENE_SILENT; break;
       case layout::ACT_SHORTER:
       case layout::ACT_LONGER: {
-        // Cycle --, 1 .. 8
-        int v = pt >= PATTERNS ? PATTERNS : pt;  // "--" sits after 8
+        // Cycle --, 1 .. 9, A ...
+        int v = pt >= PATTERNS ? PATTERNS : pt;  // "--" sits after the last pattern
         v = (v + (a == layout::ACT_LONGER ? 1 : PATTERNS)) % (PATTERNS + 1);
         pt = v == PATTERNS ? SCENE_SILENT : (uint8_t)v;
         break;
@@ -104,7 +104,7 @@ class ScenesScreen : public Screen {
         uint16_t bg = cur ? TFT_WHITE : (sc == playing ? 0x2A69 : (i % 2 ? 0x10A3 : 0x18E4));
         c.fillRect(x, y, cw - 1, ROW_H - 1, bg);
         uint8_t pt = song.scenes[sc].pattern[t];
-        if (pt < PATTERNS) snprintf(buf, sizeof(buf), "%d", pt + 1);
+        if (pt < PATTERNS) snprintf(buf, sizeof(buf), "%c", patternChar(pt));
         else snprintf(buf, sizeof(buf), "--");
         c.setTextDatum(top_center);
         c.setTextColor(cur ? TFT_BLACK : pt < PATTERNS ? col::TEXT : col::FAINT);

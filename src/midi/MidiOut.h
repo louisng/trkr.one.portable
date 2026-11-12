@@ -16,6 +16,10 @@ void beginBle(bool enabled);
 void update();  // call every loop: flushes BLE packets, tracks connection changes
 
 void setBleEnabled(bool on);
+// Unload / reload the Bluetooth stack to free RAM for WiFi. resume() restores
+// whatever on/off state Bluetooth MIDI had.
+void pauseBle();
+void resumeBle();
 void setUsbEnabled(bool on);
 bool bleEnabled();
 bool usbEnabled();
