@@ -99,14 +99,14 @@ void midiOut(const Track& tr, uint8_t pitch, uint8_t* ch, uint8_t* note) {
   }
 }
 
-void songInit() {
-  song.bpm = 120;
-  for (auto& sc : song.scenes)
+void songInitInto(Song& s) {
+  s.bpm = 120;
+  for (auto& sc : s.scenes)
     for (auto& pt : sc.pattern) pt = 0;
-  song.arrange.assign(1, 0);
-  song.songMode = false;
+  s.arrange.assign(1, 0);
+  s.songMode = false;
   for (uint8_t t = 0; t < TRACKS; t++) {
-    Track& tr = song.tracks[t];
+    Track& tr = s.tracks[t];
     strncpy(tr.name, DEFAULTS[t].name, sizeof(tr.name) - 1);
     tr.name[sizeof(tr.name) - 1] = 0;
     tr.kind = DEFAULTS[t].kind;
@@ -124,6 +124,8 @@ void songInit() {
     }
   }
 }
+
+void songInit() { songInitInto(song); }
 
 // ── Editing ──────────────────────────────────────────────────────────────────
 static bool lessEv(const NoteEvent& a, const NoteEvent& b) {
@@ -312,13 +314,13 @@ void setPatternLength(Pattern& p, uint8_t length) {
 // /cardputer-midi/songs/<name>.cms on the SD card.
 // File layout (little endian):
 //   "CMSG" u8 version  u16 bpm
-//   per track: name[6] kind channel mute pattern [hold: v2+]
+//   per track: name[6] kind channel mute pattern [hold: v2+] [v7+: u8 patternCount]
 //     per pattern: length u16 count, then count x {step offset pitch vel u16 len}
 //                  [v3+: u16 fxCount, then fxCount x {step cmd val}]
 //   [v4+: scenes SCENES x TRACKS bytes, u8 arrangeCount, arrange bytes, u8 songMode]
 //   [v5+: per track, sizeof(Instrument) bytes]
 //   [v6+: per track, sizeof(DrumRouting) bytes]
-static constexpr uint8_t SONG_VERSION = 6;
+static constexpr uint8_t SONG_VERSION = 7;  // v7: pattern count per track; v6 is still written when 8 are enough
 static char currentName[SONG_NAME_MAX + 1] = "";
 static Storage currentStore = Storage::Flash;
 
@@ -372,18 +374,39 @@ static void setCurrent(const char* name, Storage st) {
   currentStore = st;
 }
 
-static bool writeSong(File& f) {
+// True if the song uses any pattern beyond the 8 older versions could hold.
+static bool usesExtraPatterns(const Song& s) {
+  for (const auto& tr : s.tracks) {
+    if (tr.pattern >= LEGACY_PATTERNS && tr.pattern < PATTERNS) return true;
+    for (uint8_t i = LEGACY_PATTERNS; i < PATTERNS; i++) {
+      const Pattern& p = tr.patterns[i];
+      if (!p.notes.empty() || !p.fx.empty() || p.length != 16) return true;
+    }
+  }
+  for (const auto& sc : s.scenes)
+    for (uint8_t v : sc.pattern)
+      if (v >= LEGACY_PATTERNS && v < PATTERNS) return true;
+  return false;
+}
+
+static bool writeSong(File& f, const Song& s) {
+  // Songs that fit in 8 patterns per track are written exactly as before, so
+  // older firmware can still read them.
+  const uint8_t ver = usesExtraPatterns(s) ? SONG_VERSION : 6;
+  const uint8_t perTrack = ver >= 7 ? PATTERNS : LEGACY_PATTERNS;
   f.write((const uint8_t*)"CMSG", 4);
-  f.write(SONG_VERSION);
-  f.write((const uint8_t*)&song.bpm, 2);
-  for (const auto& tr : song.tracks) {
+  f.write(ver);
+  f.write((const uint8_t*)&s.bpm, 2);
+  for (const auto& tr : s.tracks) {
     f.write((const uint8_t*)tr.name, 6);
     f.write((uint8_t)tr.kind);
     f.write(tr.channel);
     f.write((uint8_t)tr.mute);
     f.write(tr.pattern);
     f.write((uint8_t)tr.hold);
-    for (const auto& p : tr.patterns) {
+    if (ver >= 7) f.write(perTrack);
+    for (uint8_t pi = 0; pi < perTrack; pi++) {
+      const Pattern& p = tr.patterns[pi];
       f.write(p.length);
       uint16_t count = (uint16_t)p.notes.size();
       f.write((const uint8_t*)&count, 2);
@@ -400,18 +423,18 @@ static bool writeSong(File& f) {
       }
     }
   }
-  for (const auto& sc : song.scenes) f.write(sc.pattern, TRACKS);
-  f.write((uint8_t)song.arrange.size());
-  if (!song.arrange.empty()) f.write(song.arrange.data(), song.arrange.size());
-  f.write((uint8_t)song.songMode);
+  for (const auto& sc : s.scenes) f.write(sc.pattern, TRACKS);
+  f.write((uint8_t)s.arrange.size());
+  if (!s.arrange.empty()) f.write(s.arrange.data(), s.arrange.size());
+  f.write((uint8_t)s.songMode);
   static_assert(sizeof(Instrument) == 12, "song file stores Instrument as 12 bytes");
-  for (const auto& tr : song.tracks) f.write((const uint8_t*)&tr.inst, sizeof(Instrument));
+  for (const auto& tr : s.tracks) f.write((const uint8_t*)&tr.inst, sizeof(Instrument));
   static_assert(sizeof(DrumRouting) == 37, "song file stores DrumRouting as 37 bytes");
-  for (const auto& tr : song.tracks) f.write((const uint8_t*)&tr.drums, sizeof(DrumRouting));
+  for (const auto& tr : s.tracks) f.write((const uint8_t*)&tr.drums, sizeof(DrumRouting));
   return f.getWriteError() == 0;
 }
 
-static bool readSong(File& f) {
+static bool readSong(File& f, Song& s) {
   char magic[4];
   uint8_t ver = 0;
   uint16_t bpm = 0;
@@ -419,21 +442,25 @@ static bool readSong(File& f) {
             f.read(&ver, 1) == 1 && ver >= 1 && ver <= SONG_VERSION &&
             f.read((uint8_t*)&bpm, 2) == 2;
   if (!ok) return false;
-  songInit();
-  song.bpm = (bpm >= BPM_MIN && bpm <= BPM_MAX) ? bpm : 120;
-  for (auto& tr : song.tracks) {
+  songInitInto(s);
+  s.bpm = (bpm >= BPM_MIN && bpm <= BPM_MAX) ? bpm : 120;
+  for (auto& tr : s.tracks) {
     uint8_t hdr[4];
     if (f.read((uint8_t*)tr.name, 6) != 6 || f.read(hdr, 4) != 4) return false;
     tr.name[5] = 0;
     tr.kind = hdr[0] == 1 ? TrackKind::Drum : TrackKind::Synth;
-    if (ver < 5) defaultInstrument(tr.inst, (uint8_t)(&tr - song.tracks), tr.kind == TrackKind::Drum);
+    if (ver < 5) defaultInstrument(tr.inst, (uint8_t)(&tr - s.tracks), tr.kind == TrackKind::Drum);
     tr.channel = (hdr[1] >= 1 && hdr[1] <= 16) ? hdr[1] : 1;
     tr.mute = hdr[2] != 0;
     tr.pattern = hdr[3] < PATTERNS ? hdr[3] : 0;
     uint8_t hold = 0;
     if (ver >= 2 && f.read(&hold, 1) != 1) return false;
     tr.hold = hold != 0;
-    for (auto& p : tr.patterns) {
+    uint8_t perTrack = LEGACY_PATTERNS;
+    if (ver >= 7 && (f.read(&perTrack, 1) != 1 || perTrack == 0 || perTrack > 64)) return false;
+    for (uint8_t pi = 0; pi < perTrack; pi++) {
+      Pattern scratch;  // patterns past what this firmware holds are read and dropped
+      Pattern& p = pi < PATTERNS ? tr.patterns[pi] : scratch;
       uint8_t len = 16;
       uint16_t count = 0;
       if (f.read(&len, 1) != 1 || f.read((uint8_t*)&count, 2) != 2) return false;
@@ -460,29 +487,29 @@ static bool readSong(File& f) {
     }
   }
   if (ver >= 4) {
-    for (auto& sc : song.scenes) {
+    for (auto& sc : s.scenes) {
       if (f.read(sc.pattern, TRACKS) != TRACKS) return false;
       for (auto& pt : sc.pattern)
         if (pt >= PATTERNS) pt = SCENE_SILENT;
     }
     uint8_t n = 0, mode = 0;
     if (f.read(&n, 1) != 1) return false;
-    song.arrange.resize(n);
-    if (n && f.read(song.arrange.data(), n) != n) return false;
-    for (auto& a : song.arrange)
+    s.arrange.resize(n);
+    if (n && f.read(s.arrange.data(), n) != n) return false;
+    for (auto& a : s.arrange)
       if (a >= SCENES) a = 0;
-    if (song.arrange.empty()) song.arrange.assign(1, 0);
+    if (s.arrange.empty()) s.arrange.assign(1, 0);
     if (f.read(&mode, 1) != 1) return false;
-    song.songMode = mode != 0;
+    s.songMode = mode != 0;
   }
   if (ver >= 5) {
-    for (auto& tr : song.tracks) {
+    for (auto& tr : s.tracks) {
       if (f.read((uint8_t*)&tr.inst, sizeof(Instrument)) != sizeof(Instrument)) return false;
       if (tr.inst.wave >= WAVE_COUNT) tr.inst.wave = WAVE_SAW;
     }
   }
   if (ver >= 6) {
-    for (auto& tr : song.tracks) {
+    for (auto& tr : s.tracks) {
       if (f.read((uint8_t*)&tr.drums, sizeof(DrumRouting)) != sizeof(DrumRouting)) return false;
       if (tr.drums.mode > DRUM_LANES_MODE) tr.drums.mode = DRUM_KIT;
       for (uint8_t i = 0; i < DRUM_LANES; i++) {
@@ -502,7 +529,7 @@ bool songSaveAs(const char* name, Storage st) {
   String tmp = String(dirFor(st)) + "/_tmp.cms_";
   File f = fsys->open(tmp, "w");
   if (!f) return false;
-  bool ok = writeSong(f);
+  bool ok = writeSong(f, song);
   f.close();
   if (!ok) {
     fsys->remove(tmp);
@@ -515,6 +542,35 @@ bool songSaveAs(const char* name, Storage st) {
   return true;
 }
 
+// Same file format, but for a song held in its own object: the sync can read
+// and write songs without touching the one that is open for editing.
+bool songSaveCopy(const char* name, const Song& s, Storage st) {
+  fs::FS* fsys = fsFor(st);
+  if (!validSongName(name) || !fsys) return false;
+  String tmp = String(dirFor(st)) + "/_tmp.cms_";
+  File f = fsys->open(tmp, "w");
+  if (!f) return false;
+  bool ok = writeSong(f, s);
+  f.close();
+  if (!ok) {
+    fsys->remove(tmp);
+    return false;
+  }
+  String path = pathFor(st, name);
+  fsys->remove(path);
+  return fsys->rename(tmp, path);
+}
+
+bool songLoadCopy(const char* name, Song& out, Storage st) {
+  fs::FS* fsys = fsFor(st);
+  if (!validSongName(name) || !fsys) return false;
+  File f = fsys->open(pathFor(st, name), "r");
+  if (!f) return false;
+  bool ok = readSong(f, out);
+  f.close();
+  return ok;
+}
+
 bool songSave() { return currentName[0] && songSaveAs(currentName, currentStore); }
 
 bool songLoadNamed(const char* name, Storage st) {
@@ -522,7 +578,7 @@ bool songLoadNamed(const char* name, Storage st) {
   if (!validSongName(name) || !fsys) return false;
   File f = fsys->open(pathFor(st, name), "r");
   if (!f) return false;
-  bool ok = readSong(f);
+  bool ok = readSong(f, song);
   f.close();
   if (!ok) {
     songInit();  // never leave a half-loaded song behind
