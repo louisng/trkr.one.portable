@@ -115,19 +115,27 @@ class SetupScreen : public Screen {
   void change(int d) {
     switch ((Item)sel) {
       case IT_BLE:
+        if (midi::bleBusy()) {
+          toast("Bluetooth is switching...");
+          break;
+        }
         settings.bleMidi = !settings.bleMidi;
-        midi::setBleEnabled(settings.bleMidi);
+        midi::setBleEnabled(settings.bleMidi);  // off unloads the stack (frees RAM)
         applyBtAuto();
-        bleSettingChanged();
         break;
       case IT_USB:
         settings.usbMidi = !settings.usbMidi;
         midi::setUsbEnabled(settings.usbMidi);
         break;
-      case IT_SPEAKER:
-        settings.speaker = !settings.speaker;
-        synth::setEnabled(settings.speaker);
+      case IT_SPEAKER: {
+        const bool want = !settings.speaker;
+        if (!synth::setEnabled(want)) {  // off releases the speaker driver; on needs room to restart it
+          toast("Not enough RAM to turn sound on");
+          break;
+        }
+        settings.speaker = want;
         break;
+      }
       case IT_VOLUME: {
         int v = settings.volume + d * 16;
         settings.volume = (uint8_t)(v < 0 ? 0 : v > 255 ? 255 : v);

@@ -100,11 +100,14 @@ void applyBtAuto() {
 }
 
 static void toggleBle() {
+  if (midi::bleBusy()) {
+    toast("Bluetooth is switching...");
+    return;
+  }
   settings.bleMidi = !settings.bleMidi;
-  midi::setBleEnabled(settings.bleMidi);
+  midi::setBleEnabled(settings.bleMidi);  // off unloads the stack (frees RAM); on loads it, if there is room
   applyBtAuto();
-  toast(settings.bleMidi ? "Bluetooth MIDI on" : "Bluetooth MIDI off");
-  bleSettingChanged();
+  toast(settings.bleMidi ? "Bluetooth MIDI on..." : "Bluetooth MIDI off (RAM freed)");
 }
 
 // Notices connections made / lost / failed on the Connect screen (or by
@@ -143,9 +146,17 @@ static void toggleUsb() {
   toast(settings.usbMidi ? "USB MIDI on" : "USB MIDI off");
 }
 static void toggleSpeaker() {
-  settings.speaker = !settings.speaker;
-  synth::setEnabled(settings.speaker);
-  toast(settings.speaker ? "Speaker on" : "Speaker off");
+  if (cloud::busy()) {
+    toast("Wait for the cloud job to finish");
+    return;
+  }
+  const bool want = !settings.speaker;
+  if (!synth::setEnabled(want)) {  // off releases the speaker driver (frees RAM); on needs room to restart it
+    toast("Not enough RAM to turn sound on");
+    return;
+  }
+  settings.speaker = want;
+  toast(want ? "Sound on" : "Sound off (RAM freed)");
 }
 
 static void toggleUpperPiano() {
@@ -475,88 +486,13 @@ static void setLowColor(bool on) {
 
 // Generated mode builds the next song while one plays: that needs the RAM the
 // 16-bit screen buffer holds, so the screen runs in 8-bit colour meanwhile.
-// Generated mode plays through the built-in speaker OR through MIDI, not both,
-// and what the other way needs is released to make room (decided when it starts):
-//   a MIDI device is connected -> the speaker driver is released (~18 KB);
-//                                 Bluetooth stays only if that device is on Bluetooth
-//   nothing connected          -> the speaker plays; Bluetooth is unloaded (~56 KB)
-// Unloading Bluetooth can take a moment (it waits for the connect-out worker), so it
-// happens on a small task, never in the UI loop.
-static bool genLatched = false, genSynthOff = false;
-static volatile int genBle = 0;  // 0 loaded, 1 unloading, 2 unloaded
-static uint32_t genStoppedAt = 0;
-static char genNote[40] = "";
-static void bleUnloadTask(void*) {
-  midi::pauseBle();
-  genBle = 2;
-  vTaskDelete(nullptr);
-}
-const char* genOutputNote() { return genNote; }
-
-// Bluetooth MIDI was switched on while Generated mode runs with Bluetooth unloaded
-// (to make room): there is no stack to switch on. Restart Generated mode, which decides
-// again with Bluetooth wanted: Bluetooth stays loaded and the speaker is released instead.
-// (Reloading Bluetooth in the middle of a song build could run out of memory.)
-void bleSettingChanged() {
-  if (!genmode::running() || !settings.bleMidi || genBle == 0 || jobMode) return;
-  for (int i = 0; i < 200 && genBle == 1; i++) vTaskDelay(pdMS_TO_TICKS(10));  // an unload still in progress
-  if (genBle != 2) return;
-  genmode::stop();
-  if (genSynthOff) {
-    synth::resume();
-    genSynthOff = false;
-  }
-  midi::resumeBle();
-  midi::setBleEnabled(settings.bleMidi);  // it comes back in the state it was unloaded in: apply the setting
-  applyBtAuto();
-  genBle = 0;
-  genLatched = false;  // the next tick decides again, with Bluetooth wanted
-  genNote[0] = 0;
-  genmode::start();
-  toast("Bluetooth on: restarting Generated mode");
-}
-
+// Generated mode builds the next song while one plays, which needs RAM: the screen
+// runs in 8-bit colour meanwhile. What else to switch off is up to you: fn+m turns the
+// sound off (releasing the speaker driver), fn+b Bluetooth MIDI (unloading it).
 static void genColorTick() {
-  if (jobMode) return;  // a cloud job decides the colour depth, the speaker and Bluetooth
+  if (jobMode) return;  // a cloud job decides the colour depth
   const bool want = genmode::running();
   if (want != lowColor && (int32_t)(millis() - colorRetryAt) >= 0) setLowColor(want);
-
-  if (want && !genLatched) {  // Generated mode just started: decide what to switch off
-    genLatched = true;
-    genStoppedAt = 0;
-    // Bluetooth stays if it is switched on (even if nothing has connected yet) or connected:
-    // that is how the songs get to a better-sounding device.
-    const bool bleKeep = settings.bleMidi || midi::bleState() == midi::LinkState::Connected;
-    const bool usbConn = midi::usbState() == midi::LinkState::Connected;
-    const bool midiOut = bleKeep || usbConn;
-    genSynthOff = midiOut || !settings.speaker;
-    if (genSynthOff) synth::pause();
-    if (!bleKeep && genBle == 0) {
-      genBle = 1;
-      if (xTaskCreatePinnedToCore(bleUnloadTask, "bleoff", 8192, nullptr, 1, nullptr, 0) != pdPASS) genBle = 0;
-    }
-    if (bleKeep) snprintf(genNote, sizeof(genNote), "MIDI out: speaker off");
-    else if (usbConn) snprintf(genNote, sizeof(genNote), "USB MIDI: speaker, Bluetooth off");
-    else if (settings.speaker) snprintf(genNote, sizeof(genNote), "speaker: Bluetooth off (fn+b = MIDI)");
-    else snprintf(genNote, sizeof(genNote), "no sound: speaker and MIDI off");
-  } else if (!want && genLatched) {  // switched off: give things back
-    if (genSynthOff) synth::resume();
-    genSynthOff = false;
-    genLatched = false;
-    genNote[0] = 0;
-  }
-  // Bluetooth comes back once the screen is back to full colour (the screen needs one big
-  // block of memory, so Bluetooth goes last), or after 8 s regardless.
-  if (!want && genBle == 2) {
-    if (!genStoppedAt) genStoppedAt = millis();
-    if (!lowColor || millis() - genStoppedAt > 8000) {
-      midi::resumeBle();
-      midi::setBleEnabled(settings.bleMidi);  // (as above: the setting may have changed meanwhile)
-      applyBtAuto();
-      genBle = 0;
-      genStoppedAt = 0;
-    }
-  }
 }
 
 static void cloudMemoryTick() {
@@ -568,7 +504,7 @@ static void cloudMemoryTick() {
     cloud::memoryReady();  // the job's worker is created only now
   } else if (jobMode && cloud::finishing()) {
     setLowColor(false);
-    synth::resume();
+    if (settings.speaker) synth::resume();  // (if the sound is off it stays released)
     jobMode = false;
     settingsSave();  // a new login / WiFi should survive a power-off right away
     cloud::restored();
@@ -613,6 +549,10 @@ void tick() {
   }
 
   uint32_t now = millis();
+  if (const char* e = midi::bleTakeError()) {  // Bluetooth couldn't be loaded (not enough RAM)
+    settings.bleMidi = false;
+    toast(e);
+  }
   cloudMemoryTick();
   genColorTick();
   genmode::tick();
