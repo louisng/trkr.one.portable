@@ -151,7 +151,9 @@ class CloudScreen : public Screen {
                    : cloud::busy() ? col::ACCENT : col::OK);
     c.drawString(cloud::message(), 8, 92);
     c.setTextColor(col::DIM);
-    if (cloud::lastSyncMs()) {
+    if (cloud::detail()[0]) {
+      c.drawString(cloud::detail(), 8, 104);
+    } else if (cloud::lastSyncMs()) {
       snprintf(buf, sizeof(buf), "last sync %lus ago", (unsigned long)((millis() - cloud::lastSyncMs()) / 1000));
       c.drawString(buf, 8, 104);
     }

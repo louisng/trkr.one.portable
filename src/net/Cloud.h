@@ -21,6 +21,7 @@ enum class State : uint8_t {
 
 void begin();
 State state();
+const char* detail();         // second status line: what was seen and what each try ended with
 const char* message();        // human-readable status of the last/current job
 const char* linkCode();       // while Linking: the code to type at /link
 const char* linkUrl();        // while Linking: where to type it

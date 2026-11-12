@@ -24,6 +24,7 @@ static const char* DEFAULT_HOST = "trkr.one";
 
 static volatile State st = State::Idle;
 static char msg[64] = "";
+static char detailBuf[64] = "";
 static char code[16] = "";
 static char url[48] = "";
 static char cfgSsid[33] = "", cfgPass[65] = "", cfgToken[64] = "", cfgEmail[64] = "", cfgHost[40] = "";
@@ -63,6 +64,7 @@ static void savePref(const char* key, const char* val) {
 void begin() { loadPrefs(); }
 State state() { return st; }
 const char* message() { return msg; }
+const char* detail() { return detailBuf; }
 const char* linkCode() { return code; }
 const char* linkUrl() { return url; }
 bool hasWifi() { return cfgSsid[0] != 0; }
@@ -166,6 +168,19 @@ static const char* reasonText(uint8_t r) {
   }
 }
 
+static bool waitJoined(uint32_t ms) {
+  uint32_t t0 = millis();
+  while (WiFi.status() != WL_CONNECTED) {
+    if (cancelReq || millis() - t0 > ms) return false;
+    delay(100);
+  }
+  return true;
+}
+
+// Joins the saved network. It first looks the network up (so we know it is
+// really in range, its channel and security), then tries up to three ways of
+// joining. The status line says what happened; the detail line says what was
+// seen and what each try ended with.
 static bool wifiUp() {
   if (WiFi.status() == WL_CONNECTED) return true;
   static bool hooked = false;
@@ -173,22 +188,54 @@ static bool wifiUp() {
     WiFi.onEvent(onWifiEvent, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
     hooked = true;
   }
-  lastReason = 0;
+  detailBuf[0] = 0;
   st = State::Connecting;
-  setMsg("Joining WiFi...");
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
-  WiFi.begin(cfgSsid, cfgPass);
-  uint32_t t0 = millis();
-  while (WiFi.status() != WL_CONNECTED) {
-    if (cancelReq) return false;
-    if (millis() - t0 > 20000) {
-      snprintf(msg, sizeof(msg), "WiFi: %s (%u)", reasonText(lastReason), (unsigned)lastReason);
-      return false;
-    }
-    delay(200);
+  WiFi.setMinSecurity(WIFI_AUTH_WPA_PSK);
+  WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
+  WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
+
+  setMsg("Looking for network...");
+  int found = WiFi.scanNetworks(false, false, false, 300, 0, cfgSsid);
+  if (cancelReq) return false;
+  if (found <= 0) {
+    WiFi.scanDelete();
+    setMsg("WiFi: network not in range");
+    snprintf(detailBuf, sizeof(detailBuf), "looked for \"%.30s\"", cfgSsid);
+    return false;
   }
-  return true;
+  int best = 0;
+  for (int i = 1; i < found; i++)
+    if (WiFi.RSSI(i) > WiFi.RSSI(best)) best = i;
+  int ch = WiFi.channel(best);
+  uint8_t bssid[6];
+  memcpy(bssid, WiFi.BSSID(best), 6);
+  int rssi = WiFi.RSSI(best);
+  uint8_t auth = (uint8_t)WiFi.encryptionType(best);
+  WiFi.scanDelete();
+
+  uint8_t reasons[3] = {0, 0, 0};
+  for (int attempt = 0; attempt < 3; attempt++) {
+    lastReason = 0;
+    snprintf(msg, sizeof(msg), "Joining WiFi (try %d/3)...", attempt + 1);
+    snprintf(detailBuf, sizeof(detailBuf), "ch%d %s %ddBm pw %d", ch, authName(auth), rssi, (int)strlen(cfgPass));
+    WiFi.disconnect();
+    delay(150);
+    if (attempt == 0) {
+      WiFi.begin(cfgSsid, cfgPass);
+    } else {
+      if (attempt == 2) WiFi.setTxPower(WIFI_POWER_11dBm);  // a gentler transmitter
+      WiFi.begin(cfgSsid, cfgPass, ch, bssid);
+    }
+    if (waitJoined(12000)) return true;
+    if (cancelReq) return false;
+    reasons[attempt] = lastReason;
+  }
+  snprintf(msg, sizeof(msg), "WiFi: %s (%u)", reasonText(reasons[2]), (unsigned)reasons[2]);
+  snprintf(detailBuf, sizeof(detailBuf), "ch%d %s %ddBm pw%d tries %u/%u/%u", ch, authName(auth), rssi,
+           (int)strlen(cfgPass), reasons[0], reasons[1], reasons[2]);
+  return false;
 }
 
 static void wifiDown() {
@@ -466,6 +513,7 @@ static void start(Job j) {
   if (task) return;
   job = j;
   cancelReq = false;
+  detailBuf[0] = 0;
   if (j != Job::Login) memset(loginPass, 0, sizeof(loginPass));
   // TLS needs a deep stack.
   st = State::Connecting;
