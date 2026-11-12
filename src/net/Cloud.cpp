@@ -113,7 +113,7 @@ bool scanning() {
     scanBad = true;
     return false;
   }
-  for (int i = 0; i < n; i++) addNet(nets, WiFi.SSID(i).c_str(), WiFi.RSSI(i), WiFi.encryptionType(i) == WIFI_AUTH_OPEN);
+  for (int i = 0; i < n; i++) addNet(nets, WiFi.SSID(i).c_str(), WiFi.RSSI(i), WiFi.encryptionType(i) == WIFI_AUTH_OPEN, (uint8_t)WiFi.encryptionType(i));
   sortNets(nets);
   WiFi.scanDelete();
   return false;

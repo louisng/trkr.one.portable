@@ -93,7 +93,7 @@ class CloudScreen : public Screen {
       c.setTextColor(col::TEXT);
       char shown[72];
       size_t n = strlen(field);
-      if (mode == Mode::Pass || mode == Mode::LoginPass) {
+      if (mode == Mode::LoginPass) {
         for (size_t i = 0; i < n; i++) shown[i] = i + 1 == n ? field[i] : '*';
         shown[n] = 0;
       } else strcpy(shown, field);
@@ -101,6 +101,11 @@ class CloudScreen : public Screen {
       c.drawString(vis, 10, 40);
       c.drawString("_", 10 + c.textWidth(vis), 40);
       c.setTextColor(col::DIM);
+      if (mode == Mode::Pass) {
+        char nm[48];
+        snprintf(nm, sizeof(nm), "for \"%.28s\"  (%d chars)", newSsid, (int)strlen(field));
+        c.drawString(nm, 8, 82);
+      }
       c.drawString("shift = capitals/symbols  del = erase", 8, 60);
       c.drawString("enter = OK    hold ` = cancel", 8, 72);
       return;
@@ -254,7 +259,16 @@ class CloudScreen : public Screen {
       }
     }
     c.setTextColor(col::FAINT);
-    c.drawString("; . pick  enter ok  spc rescan  del back", 4, H - 9);
+    if (scanSel < cloud::scanCount()) {
+      char info[40];
+      snprintf(info, sizeof(info), "%s  %d dBm", cloud::authName(cloud::scanNet(scanSel).auth), cloud::scanNet(scanSel).rssi);
+      c.setTextDatum(top_right);
+      c.drawString(info, W - 4, H - 9);
+      c.setTextDatum(top_left);
+      c.drawString("enter ok spc rescan", 4, H - 9);
+    } else {
+      c.drawString("; . pick  enter ok  spc rescan  del back", 4, H - 9);
+    }
   }
 
   void append(char ch) {
