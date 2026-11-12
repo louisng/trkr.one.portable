@@ -75,5 +75,6 @@ void goTo(Screen* s);
 void applyBtAuto();  // switch screens from inside a screen / panel
 void markDirty();
 bool isAdv();
+bool bleUnloadedForGenerate();  // Bluetooth is unloaded while Generated mode runs (RAM)
 
 }  // namespace ui
