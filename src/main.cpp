@@ -20,6 +20,18 @@ using namespace bootguard;
 #define DBG(...)
 #endif
 
+// The ADV's panel comes up in portrait at the library's default rotation, the
+// original Cardputer's in landscape. Take the first rotation (1 first, so the
+// original board is unchanged) that is wider than tall.
+static void setLandscape() {
+  auto& d = M5Cardputer.Display;
+  static const uint8_t ORDER[] = {1, 0, 3, 2};
+  for (uint8_t r : ORDER) {
+    d.setRotation(r);
+    if (d.width() > d.height()) return;
+  }
+}
+
 void setup() {
 #ifdef BOOT_DEBUG
   Serial.begin(115200);
@@ -33,6 +45,7 @@ void setup() {
 #endif
   auto cfg = M5.config();
   M5Cardputer.begin(cfg, true);
+  setLandscape();
   DBG("[boot] M5Cardputer.begin done, board=%d (ADV=%d, Cardputer=%d)\n", (int)M5.getBoard(),
       (int)m5::board_t::board_M5CardputerADV, (int)m5::board_t::board_M5Cardputer);
   DBG("[boot] display %dx%d\n", (int)M5Cardputer.Display.width(), (int)M5Cardputer.Display.height());
