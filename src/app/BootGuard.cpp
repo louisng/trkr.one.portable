@@ -80,7 +80,8 @@ void begin() {
   }
   rtcStage = ST_NONE;
 
-  M5Cardputer.Display.setRotation(1);
+  // Rotation is chosen in main.cpp (setLandscape) before this runs; forcing
+  // rotation 1 here put the ADV back into portrait.
   drawHeader();
 }
 
