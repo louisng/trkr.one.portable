@@ -12,6 +12,7 @@
 
 #include "../app/Settings.h"
 #include "../input/KeyLayout.h"
+#include "../midi/MidiOut.h"
 #include "../music/Theory.h"
 #include "../play/GenMode.h"
 #include "../seq/Engine.h"
@@ -89,6 +90,10 @@ class GenScreen : public Screen {
                seq::playing() ? "" : "   (paused)");
     }
     c.drawString(line, 6, 31);
+    if (genmode::lowMemory()) {
+      c.setTextColor(col::DIM);
+      c.drawString("fn+m sound off / fn+b Bluetooth off", 6, 42);
+    }
 
     // Where we are
     if (st == genmode::State::Playing) {
@@ -143,10 +148,11 @@ class GenScreen : public Screen {
       c.drawString(line, W - 4, 53);
       c.setTextDatum(top_left);
     }
-    if (st != genmode::State::Idle && genOutputNote()[0]) {
-      c.setTextColor(col::DIM);
-      c.drawString(genOutputNote(), 6, 94);
-    }
+    // What is on (each can be switched off to free RAM: fn+m sound, fn+b Bluetooth, fn+u USB)
+    c.setTextColor(col::DIM);
+    snprintf(line, sizeof(line), "sound %s  Bluetooth %s  USB %s", settings.speaker ? "ON" : "off",
+             midi::bleEnabled() ? "ON" : "off", settings.usbMidi ? "ON" : "off");
+    c.drawString(line, 6, 96);
     c.setTextColor(col::FAINT);
     c.drawString(", / genre  ; . keys  enter new  space play", 4, H - 20);
     c.drawString("del off  fn+1-8 mute  fn+s save", 4, H - 10);

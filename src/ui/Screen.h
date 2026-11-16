@@ -75,11 +75,6 @@ void goTo(Screen* s);
 void applyBtAuto();  // switch screens from inside a screen / panel
 void markDirty();
 bool isAdv();
-// What Generated mode switched off to make room: the speaker when a MIDI device is
-// connected, Bluetooth when it is not ("" when nothing was).
-const char* genOutputNote();
-// Call after Bluetooth MIDI is switched on or off: while Generated mode runs with
-// Bluetooth unloaded, switching it on restarts Generated mode with Bluetooth kept.
-void bleSettingChanged();
+
 
 }  // namespace ui
