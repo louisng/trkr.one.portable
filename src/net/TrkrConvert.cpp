@@ -52,7 +52,11 @@ static uint8_t presetFor(const char* voice, TrackType type) {
 }
 
 static bool sameNotes(const seq::Pattern& a, const seq::Pattern& b) {
-  if (a.length != b.length || a.notes.size() != b.notes.size()) return false;
+  if (a.length != b.length || a.notes.size() != b.notes.size() || a.fx.size() != b.fx.size()) return false;
+  for (const auto& x : a.fx) {  // the same strums on the same steps
+    uint8_t c = 0, v = 0;
+    if (!seq::fxAt(b, x.step, &c, &v) || c != x.cmd || v != x.val) return false;
+  }
   for (size_t i = 0; i < a.notes.size(); i++) {
     const auto &x = a.notes[i], &y = b.notes[i];
     if (x.step != y.step || x.offset != y.offset || x.pitch != y.pitch || x.vel != y.vel || x.len != y.len)
@@ -149,6 +153,7 @@ bool Importer::addPattern(const Pattern& wp, const char** error) {
         n.flags = 0;
         cand.notes.push_back(n);
       }
+      if (seq::strumValid(e.strum) && e.count > 1) seq::setFx(cand, e.step, seq::FX_STRUM, e.strum);
     }
     if (cand.notes.empty()) continue;  // silent in this pattern
     std::sort(cand.notes.begin(), cand.notes.end(), lessNote);
@@ -345,6 +350,8 @@ bool toWeb(const seq::Song& in, const Meta* meta, const char* name, Song& out, c
           }
           if (e.count == 0 || base + step >= len) continue;
           e.step = (uint8_t)(base + step);
+          uint8_t fc = seq::FX_NONE, fv = 0;
+          if (e.count > 1 && seq::fxAt(p, step, &fc, &fv) && fc == seq::FX_STRUM && seq::strumValid(fv)) e.strum = fv;
           wp.events.push_back(e);
           if (++events > MAX_EVENTS) return fail("song is too big for the device to convert");
         }

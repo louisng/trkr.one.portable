@@ -48,8 +48,19 @@ enum FxCmd : uint8_t {
   FX_MOD,       // M xx: sends mod wheel (CC1) = xx at the step
   FX_BEND,      // B xx: sends pitch bend, 40 = centre
   FX_PROGRAM,   // G xx: sends program change xx
+  FX_STRUM,     // S n: strum the step's notes like a guitar. n = 1-3 down, 4-6 up; fast / medium / slow
   FX_COUNT
 };
+
+// Strum (FX_STRUM): 1 2 3 = down (lowest note first), 4 5 6 = up, each fast / medium / slow.
+// Notes follow each other 1, 2 or 4 ticks apart (the website's 2, 4 or 8 in 1/24ths of a step), and each
+// later note is STRUM_FALL softer. trkr.one plays strums the same way.
+static constexpr uint8_t STRUM_FALL = 6;
+inline bool strumValid(uint8_t v) { return v >= 1 && v <= 6; }
+inline bool strumUp(uint8_t v) { return v > 3; }
+inline uint8_t strumGapTicks(uint8_t v) { return (uint8_t)(1u << ((v - 1) % 3)); }
+// Of n notes (lowest first), the place of note i in the strum: 0 sounds first.
+inline uint8_t strumIndex(uint8_t v, uint8_t i, uint8_t n) { return strumUp(v) ? (uint8_t)(n - 1 - i) : i; }
 
 struct StepFx {
   uint8_t step;

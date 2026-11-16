@@ -32,7 +32,7 @@ USB MIDI sequencer for the Arduboy.
 - **Named songs**: save as many as fit (about 1.5 MB), with names typed on the keyboard;
   Songs screen to load / save over / delete. The song you had open loads at power-on.
 - **Tracker effects**: chance, ratchets, trig conditions, humanize, mod wheel, pitch bend,
-  program change
+  program change, and **strum** (a chord played note by note, like a guitar)
 
 ## Keyboard
 
@@ -110,6 +110,7 @@ classic tracker layout: `q w e r t y u i o p [ ] \` are white keys (C up to A) a
     | `M` | 00–7F | sends mod wheel (CC 1) at the row, even without a note |
     | `B` | 00–7F | sends pitch bend (40 = centre) |
     | `G` | 00–7F | sends a program change |
+    | `S` | 1–6 | strum a chord: 1–3 down (lowest note first), 4–6 up; fast / medium / slow. Each later note is a little softer. Plays the same on trkr.one, which sets it with STRUM buttons in the sequencer. A step with no `S` plays its chord all at once, as always. |
 
     Rows with an effect show its letter on the Step screen too.
   - `'` opens the same track options as the Step screen.

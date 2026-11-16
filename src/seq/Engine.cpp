@@ -138,14 +138,15 @@ struct Pending {
   uint8_t track;
   uint32_t tick;
   NoteEvent e;
+  bool hold;  // a strummed note on a hold-mode track rings on like the rest of its chord
 };
 static constexpr uint8_t MAX_PENDING = 32;
 static Pending pending[MAX_PENDING];
 
-static void schedule(uint8_t t, uint32_t tick, const NoteEvent& e) {
+static void schedule(uint8_t t, uint32_t tick, const NoteEvent& e, bool hold = false) {
   for (auto& q : pending)
     if (!q.used) {
-      q = {true, t, tick, e};
+      q = {true, t, tick, e, hold};
       return;
     }
 }
@@ -186,7 +187,7 @@ static void processTick(uint32_t tick) {
     if (q.used && (int32_t)(tick - q.tick) >= 0) {
       q.used = false;
       const Track& tr = song.tracks[q.track];
-      if (!tr.mute && !silent[q.track]) startNote(q.track, tr, q.e, tick, true);
+      if (!tr.mute && !silent[q.track]) startNote(q.track, tr, q.e, tick, !q.hold);
     }
 
   // Song mode: start, follow and stop the arrangement.
@@ -253,6 +254,18 @@ static void processTick(uint32_t tick) {
         if (cmd == FX_HUMANIZE && val) {
           int v = (int)e.vel + (int)random(-(long)val, (long)val + 1);
           e.vel = (uint8_t)(v < 1 ? 1 : v > 127 ? 127 : v);
+        }
+        if (cmd == FX_STRUM && strumValid(val) && nf >= 2) {
+          // Strum: the step's notes (lowest first in the song) one after another; down = low to high.
+          const uint8_t gap = strumGapTicks(val);
+          const uint8_t k = strumIndex(val, i, nf);   // this note's place in the strum
+          const int v = (int)e.vel - (int)k * STRUM_FALL;
+          e.vel = (uint8_t)(v < 1 ? 1 : v);
+          const uint32_t late = (uint32_t)k * gap;
+          e.len = (uint16_t)(e.len > late + 1 ? e.len - late : 1);   // all the notes end together
+          if (k == 0) startNote(t, tr, e, tick);
+          else schedule(t, tick + late, e, true);
+          continue;
         }
         if (cmd == FX_RATCHET && val >= 2) {
           const uint8_t n = val > 6 ? 6 : val;

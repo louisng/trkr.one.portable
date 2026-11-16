@@ -38,6 +38,7 @@ struct Event {
   uint8_t notes[MAX_NOTES];
   uint16_t len24;           // length in 1/24 steps
   int8_t delay;             // micro-timing in 1/24 steps (-12..12)
+  uint8_t strum = 0;        // 1-6: the step is strummed (see seq::FX_STRUM); 0 = not
 };
 
 struct Pattern {
