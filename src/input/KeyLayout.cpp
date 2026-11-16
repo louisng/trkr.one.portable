@@ -59,9 +59,26 @@ static const KeyDef UPPER[2][COLS] = {
     {R::Piano, 33, nullptr} },
 };
 
-static bool upper = false;
-void setUpperPiano(bool on) { upper = on; }
-bool upperPiano() { return upper; }
+// Chord bank (fn+p, third state): row 0 = roots C..B, row 1 = chord types.
+// The type labels are in theory::bankQualityLabel; the screen reads them from there.
+static const KeyDef BANK[2][COLS] = {
+  { {R::Action, ACT_MENU, "MNU"},
+    {R::BankRoot, 0, nullptr}, {R::BankRoot, 1, nullptr}, {R::BankRoot, 2, nullptr},
+    {R::BankRoot, 3, nullptr}, {R::BankRoot, 4, nullptr}, {R::BankRoot, 5, nullptr},
+    {R::BankRoot, 6, nullptr}, {R::BankRoot, 7, nullptr}, {R::BankRoot, 8, nullptr},
+    {R::BankRoot, 9, nullptr}, {R::BankRoot, 10, nullptr}, {R::BankRoot, 11, nullptr},
+    {R::Action, ACT_DELETE, "DEL"} },
+  { {R::Action, ACT_INVERSION, "/"},
+    {R::BankQual, 0, nullptr}, {R::BankQual, 1, nullptr}, {R::BankQual, 2, nullptr},
+    {R::BankQual, 3, nullptr}, {R::BankQual, 4, nullptr}, {R::BankQual, 5, nullptr},
+    {R::BankQual, 6, nullptr}, {R::BankQual, 7, nullptr}, {R::BankQual, 8, nullptr},
+    {R::BankQual, 9, nullptr}, {R::BankQual, 10, nullptr}, {R::BankQual, 11, nullptr},
+    {R::BankQual, 12, nullptr} },
+};
+
+static uint8_t top = TOP_PLAY;
+void setTopMode(uint8_t mode) { top = mode < TOP_MODES ? mode : TOP_PLAY; }
+uint8_t topMode() { return top; }
 
 static const char* const CAPS[ROWS][COLS] = {
   { "`", "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "-", "=", "del" },
@@ -75,7 +92,10 @@ static const KeyDef NONE_KEY = {R::None, 0, ""};
 
 const KeyDef& keyAt(uint8_t row, uint8_t col) {
   if (row >= ROWS || col >= COLS) return NONE_KEY;
-  if (upper && row < 2) return UPPER[row][col];
+  if (row < 2) {
+    if (top == TOP_PIANO) return UPPER[row][col];
+    if (top == TOP_BANK) return BANK[row][col];
+  }
   return LAYOUT[row][col];
 }
 

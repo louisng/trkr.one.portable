@@ -150,9 +150,12 @@ static void toggleSpeaker() {
 
 static void toggleUpperPiano() {
   player::releaseAll();  // the keys are about to change meaning
-  settings.upperPiano = !settings.upperPiano;
-  layout::setUpperPiano(settings.upperPiano);
-  toast(settings.upperPiano ? "Top rows: piano (upper octave)" : "Top rows: drums + chords");
+  settings.topMode = (settings.topMode + 1) % layout::TOP_MODES;
+  layout::setTopMode(settings.topMode);
+  if (settings.topMode == layout::TOP_BANK) player::bankReset();
+  toast(settings.topMode == layout::TOP_PIANO  ? "Top rows: piano (upper octave)"
+        : settings.topMode == layout::TOP_BANK ? "Top rows: chord bank (root, then type)"
+                                               : "Top rows: drums + chords");
 }
 
 // Quick save: to the open song's name, or ask for a name if it has none.
@@ -415,7 +418,7 @@ static void drawMenu() {
   canvas.drawString(buf, x + 110, y + 72);
   snprintf(buf, sizeof(buf), "m Sound: %s", settings.speaker ? "ON" : "off");
   canvas.drawString(buf, x + 8, y + 82);
-  snprintf(buf, sizeof(buf), "p Top: %s", settings.upperPiano ? "piano" : "drum+chd");
+  snprintf(buf, sizeof(buf), "p Top: %s", settings.topMode == 1 ? "piano" : settings.topMode == 2 ? "chord bank" : "drum+chd");
   canvas.drawString(buf, x + 110, y + 82);
   canvas.setTextColor(col::DIM);
   canvas.drawString("fn+ m p b u s: same  fn+1-8: mute", x + 8, y + 94);
@@ -595,7 +598,7 @@ void begin() {
   idxW = findCap("w");
   idxG = findCap("g");
   applyBtAuto();  // reconnect the remembered Bluetooth device
-  layout::setUpperPiano(settings.upperPiano);
+  layout::setTopMode(settings.topMode);
   lastBle = midi::bleState();
   lastUsb = midi::usbState();
   current = stepScreen();

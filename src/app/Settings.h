@@ -14,7 +14,7 @@ struct Settings {
   int8_t octave = 4;       // piano octave (C4 = 60); chords play one octave lower
   uint8_t metronome = 1;   // 0 off, 1 while recording, 2 always
   bool quantize = true;    // snap live-recorded notes to steps
-  bool upperPiano = false; // top two rows = second piano octave (fn+p)
+  uint8_t topMode = 0;     // top two rows: 0 drums+chords, 1 piano, 2 chord bank (fn+p)
   char lastSong[17] = "";  // song loaded at power-on
   bool clockOut = true;    // send MIDI clock + start/stop while playing
   bool lastSongOnSd = false;  // lastSong lives on the SD card

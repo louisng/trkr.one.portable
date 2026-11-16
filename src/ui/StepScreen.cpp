@@ -272,7 +272,8 @@ class StepScreen : public Screen {
     c.setTextDatum(top_left);
     c.setTextColor(col::DIM);
     c.drawString(layout::upperPiano() ? "fn+p: drum pads are piano now"
-                                      : "drum pads: toggle  del: clear",
+                 : layout::topMode() == layout::TOP_BANK ? "fn+p: top rows are the chord bank"
+                                                         : "drum pads: toggle  del: clear",
                  4, top + 12 * laneH + 3);
   }
 };
