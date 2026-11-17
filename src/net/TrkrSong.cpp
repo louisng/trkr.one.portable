@@ -179,6 +179,13 @@ bool Parser::line(const char* text) {
       return false;
     }
     p.events.push_back(e);
+  } else if (cmdIs(text, "lk")) {
+    // `lk <track> <pattern>`: this pattern's track is the same part as that earlier pattern's
+    if (s_.patterns.empty()) return true;
+    long track = strtol(args, &end, 10);
+    long from = strtol(end, &end, 10);
+    if (track >= 0 && track < s_.trackCount && from >= 0 && from < (long)s_.patterns.size() - 1)
+      s_.patterns.back().links.push_back({(uint8_t)track, (uint16_t)from});
   } else if (cmdIs(text, "sx")) {
     // `sx <track> <step> <code>`: the step of the cell just above is strummed. Older readers skip it.
     if (s_.patterns.empty()) return true;
@@ -273,6 +280,7 @@ void save(Print& out, const Song& s) {
       out.print('\n');
       if (e.strum && e.count > 1) out.printf("sx %u %u %u\n", e.track, e.step, e.strum);
     }
+    for (const auto& l : p.links) out.printf("lk %u %u\n", l.first, (unsigned)l.second);
   }
   out.print("order");
   for (uint8_t pi : s.order) out.printf(" %u", pi);

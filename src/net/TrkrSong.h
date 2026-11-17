@@ -53,6 +53,9 @@ struct Pattern {
   uint16_t len = 16;
   char name[12] = "";
   std::vector<Event> events;  // sorted by step
+  // Tracks that play the same part as an earlier pattern's (a scene sharing a part): {track, that pattern}.
+  // An `lk` line; the notes are listed in full anyway, so it only says they are one part.
+  std::vector<std::pair<uint8_t, uint16_t>> links;
 };
 
 struct Song {
