@@ -103,6 +103,16 @@ bool Importer::begin(const Song& in, Meta& meta, const char** error) {
     d.pattern = 0;
     if (drum) seq::defaultInstrument(d.inst, t, true);
     else seq::applyPreset(d.inst, presetFor(s.voice, s.type));
+    if (s.hasInst) {   // the song's own sound settings instead of a preset by name
+      d.inst.sound = s.inst.sound;
+      d.inst.wave = s.inst.wave < seq::WAVE_COUNT ? s.inst.wave : (uint8_t)seq::WAVE_SAW;
+      d.inst.octave = s.inst.octave;
+      d.inst.detune = s.inst.detune;
+      d.inst.attack = s.inst.attack;   d.inst.decay = s.inst.decay;
+      d.inst.sustain = s.inst.sustain; d.inst.release = s.inst.release;
+      d.inst.cutoff = s.inst.cutoff;   d.inst.resonance = s.inst.resonance;
+      d.inst.envMod = s.inst.envMod;
+    }
     d.inst.volume = (uint8_t)clampi(s.vol * 127 / 100, 0, 127);
     memset(&d.drums, 0, sizeof(d.drums));
     seq::drumRoutingGmKit(d.drums);
@@ -314,6 +324,15 @@ bool toWeb(const seq::Song& in, const Meta* meta, const char* name, Song& out, c
       d.vol = (uint8_t)clampi(s.inst.volume * 100 / 127, 0, 100);
       d.strum = 0;
     }
+  }
+
+  for (uint8_t t = 0; t <= last; t++) {   // the device's sounds go with the song
+    const seq::Instrument& ins = in.tracks[t].inst;
+    Track& d = out.tracks[t];
+    d.hasInst = true;
+    d.inst.sound = ins.sound ? 1 : 0;  d.inst.wave = ins.wave;  d.inst.octave = ins.octave;  d.inst.detune = ins.detune;
+    d.inst.attack = ins.attack;  d.inst.decay = ins.decay;  d.inst.sustain = ins.sustain;  d.inst.release = ins.release;
+    d.inst.cutoff = ins.cutoff;  d.inst.resonance = ins.resonance;  d.inst.envMod = ins.envMod;
   }
 
   uint32_t events = 0;

@@ -31,6 +31,7 @@ USB MIDI sequencer for the Arduboy.
   the arrangement lists scenes in play order (e.g. `1 1 4 3 2 1 1 6`)
 - **Named songs**: save as many as fit (about 1.5 MB), with names typed on the keyboard;
   Songs screen to load / save over / delete. The song you had open loads at power-on.
+- **Sounds sync with trkr.one**: a track's Synth settings (wave, octave, detune, envelope, filter) go to the site and back, so a sound shaped in the browser's cog menu plays here the same way.
 - **Tracker effects**: chance, ratchets, trig conditions, humanize, mod wheel, pitch bend,
   program change, and **strum** (a chord played note by note, like a guitar)
 
