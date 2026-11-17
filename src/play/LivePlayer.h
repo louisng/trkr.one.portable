@@ -33,6 +33,11 @@ typedef int (*NoteFilter)(int note);
 void setNoteFilter(NoteFilter f);
 
 uint8_t inversion();
+// Chord bank (top rows in TOP_BANK): the root picked, and the slash-bass mode
+// (0 none, 1 /3rd, 2 /5th, 3 /7th). `bankReset` starts from the song's key.
+uint8_t bankRoot();
+uint8_t bankBass();
+void bankReset();
 // Text describing the most recent thing played, e.g. "Cmaj7", "E4", "Snare".
 const char* lastPlayed();
 // Pitch of a piano key in the current octave/key/mode, or -1 if inactive.

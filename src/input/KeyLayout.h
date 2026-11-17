@@ -25,6 +25,8 @@ enum class Role : uint8_t {
   Chord,   // value = chord button index 0-12
   Piano,   // value = semitones above the bottom rows' C (0-11 bottom rows, 12-33 upper piano)
   Action,  // value = Action
+  BankRoot,  // chord bank: value = root pitch class 0-11 (selects the root, silent)
+  BankQual,  // chord bank: value = chord type 0-12 (plays root + type)
 };
 
 enum Action : uint8_t {
@@ -61,10 +63,14 @@ struct KeyDef {
 const KeyDef& keyAt(uint8_t row, uint8_t col);
 inline const KeyDef& keyAt(uint8_t index) { return keyAt(index / COLS, index % COLS); }
 
-// Upper-piano mode: top two rows become a second piano octave instead of
-// drum pads and chord buttons.
-void setUpperPiano(bool on);
-bool upperPiano();
+// What the top two rows do (fn+p cycles):
+//   TOP_PLAY  drum pads + diatonic chord buttons
+//   TOP_PIANO a second piano octave
+//   TOP_BANK  chord bank: row 1 picks a root (C..B), row 2 plays a chord type on it
+enum TopMode : uint8_t { TOP_PLAY, TOP_PIANO, TOP_BANK, TOP_MODES };
+void setTopMode(uint8_t mode);
+uint8_t topMode();
+inline bool upperPiano() { return topMode() == TOP_PIANO; }
 
 // Printable character for a key (for the key-test screen).
 const char* keyCapLabel(uint8_t row, uint8_t col);

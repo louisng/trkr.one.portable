@@ -60,6 +60,15 @@ static const ExtraChord EXTRAS_MINOR[6] = {
 
 static bool isMinorFamily(uint8_t scale) { return scaleOffset(scale, 2) == 3; }
 
+const char* noteNameFlat(uint8_t pc) {
+  static const char* const N[12] = {"C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"};
+  return N[pc % 12];
+}
+bool keyUsesFlats(uint8_t root, uint8_t scale) {
+  const uint8_t major = isMinorFamily(scale) ? (root + 3) % 12 : root % 12;
+  return major == 5 || major == 10 || major == 3 || major == 8 || major == 1 || major == 6;
+}
+
 static const char* const ROMAN_UP[7] = {"I", "II", "III", "IV", "V", "VI", "VII"};
 static const char* const ROMAN_LO[7] = {"i", "ii", "iii", "iv", "v", "vi", "vii"};
 
@@ -166,6 +175,111 @@ Chord buildChord(uint8_t scale, uint8_t root, uint8_t button, uint8_t bassNote,
   }
   chordName((uint8_t)((root + rootOff) % 12), third, fifth, mods.seventh ? seventh : -1,
             mods.ninth, c.name, sizeof(c.name));
+  return c;
+}
+
+// ── Chord bank ───────────────────────────────────────────────────────────────
+struct BankQuality {
+  const char* label;
+  uint8_t n;
+  int8_t iv[4];
+};
+static const BankQuality BANK[BANK_QUALITIES] = {
+    {"M", 3, {0, 4, 7}},        {"m", 3, {0, 3, 7}},        {"7", 4, {0, 4, 7, 10}},
+    {"M7", 4, {0, 4, 7, 11}},   {"m7", 4, {0, 3, 7, 10}},   {"s4", 3, {0, 5, 7}},
+    {"s2", 3, {0, 2, 7}},       {"a9", 4, {0, 4, 7, 14}},   {"m7b", 4, {0, 3, 6, 10}},
+    {"o", 3, {0, 3, 6}},        {"6", 4, {0, 4, 7, 9}},     {"m6", 4, {0, 3, 7, 9}},
+    {"+", 3, {0, 4, 8}},
+};
+
+const char* bankQualityLabel(uint8_t q) { return q < BANK_QUALITIES ? BANK[q].label : ""; }
+
+static bool hasIv(const int* iv, uint8_t n, int v) {
+  for (uint8_t i = 0; i < n; i++)
+    if (iv[i] == v) return true;
+  return false;
+}
+
+// Reads the name straight off the final set of intervals, so it stays right
+// whatever combination of type and modifiers made them.
+static void bankName(uint8_t rootPc, const int* iv, uint8_t n, int bassIv, bool flats, char* out, size_t cap) {
+  auto nm = [&](uint8_t pc) { return flats ? noteNameFlat(pc % 12) : noteName(pc % 12); };
+  const int third = hasIv(iv, n, 3) ? 3 : hasIv(iv, n, 4) ? 4 : hasIv(iv, n, 5) ? 5 : hasIv(iv, n, 2) ? 2 : 0;
+  const int fifth = hasIv(iv, n, 6) ? 6 : hasIv(iv, n, 8) ? 8 : 7;
+  const bool dim = third == 3 && fifth == 6;
+  const int seventh = hasIv(iv, n, 11) ? 11 : hasIv(iv, n, 10) ? 10 : (dim && hasIv(iv, n, 9)) ? 9 : 0;
+  const bool sixth = !seventh && hasIv(iv, n, 9);
+  const bool ninth = hasIv(iv, n, 14);
+
+  char q[24] = "";
+  if (dim) snprintf(q, sizeof(q), seventh == 9 ? (ninth ? "dim9" : "dim7") : seventh == 10 ? (ninth ? "m9b5" : "m7b5") : "dim");
+  else if (third == 3) {
+    if (seventh == 11) snprintf(q, sizeof(q), ninth ? "mMaj9" : "mMaj7");
+    else if (seventh == 10) snprintf(q, sizeof(q), ninth ? "m9" : "m7");
+    else if (sixth) snprintf(q, sizeof(q), ninth ? "m6add9" : "m6");
+    else snprintf(q, sizeof(q), ninth ? "madd9" : "m");
+  } else {
+    const char* aug = fifth == 8 ? "aug" : "";
+    if (seventh == 11) snprintf(q, sizeof(q), "%s%s", aug, ninth ? "maj9" : "maj7");
+    else if (seventh == 10) snprintf(q, sizeof(q), "%s%s", aug, ninth ? "9" : "7");
+    else if (sixth) snprintf(q, sizeof(q), ninth ? "6add9" : "6");
+    else snprintf(q, sizeof(q), "%s%s", aug, ninth ? "add9" : "");
+  }
+  const char* s = third == 5 ? "sus4" : third == 2 ? "sus2" : "";
+  char tail[8] = "";
+  if (bassIv >= 0) snprintf(tail, sizeof(tail), "/%s", nm((rootPc + bassIv) % 12));
+  snprintf(out, cap, "%s%s%s%s", nm(rootPc), q, s, tail);
+}
+
+Chord buildBankChord(uint8_t rootPc, uint8_t quality, uint8_t baseNote, const BankMods& mods) {
+  Chord c;
+  if (quality >= BANK_QUALITIES) return c;
+  const BankQuality& bq = BANK[quality];
+  int iv[MAX_CHORD_NOTES + 1];
+  uint8_t n = 0;
+  for (uint8_t i = 0; i < bq.n; i++) iv[n++] = bq.iv[i];
+
+  auto idx = [&](int v) { for (uint8_t i = 0; i < n; i++) if (iv[i] == v) return (int)i; return -1; };
+  if (mods.swap) {
+    int t = idx(4) >= 0 ? idx(4) : idx(3);
+    if (t >= 0) {
+      const bool wasMajor = iv[t] == 4;
+      iv[t] = wasMajor ? 3 : 4;
+      int f = idx(8) >= 0 ? idx(8) : idx(6);
+      if (f >= 0 && (idx(8) >= 0 || !wasMajor)) iv[f] = 7;  // aug -> 5, dim -> 5 when it turns major
+    }
+  }
+  if (mods.sus4) {
+    int t = idx(4) >= 0 ? idx(4) : idx(3) >= 0 ? idx(3) : idx(2);
+    if (t >= 0) iv[t] = 5;
+  }
+  if (mods.seventh && idx(10) < 0 && idx(11) < 0 && !(idx(6) >= 0 && idx(9) >= 0)) iv[n++] = 10;
+  if (mods.ninth && idx(14) < 0) iv[n++] = 14;
+
+  // The bass note: the chord's 3rd, 5th or 7th, an octave below the chord.
+  int bassIv = -1;
+  if (mods.bass == 1) { int t = idx(3) >= 0 ? 3 : idx(4) >= 0 ? 4 : idx(5) >= 0 ? 5 : idx(2) >= 0 ? 2 : -1; bassIv = t; }
+  else if (mods.bass == 2) bassIv = idx(6) >= 0 ? 6 : idx(8) >= 0 ? 8 : 7;
+  else if (mods.bass == 3) bassIv = idx(11) >= 0 ? 11 : idx(10) >= 0 ? 10 : 10;
+
+  char name[16];
+  bankName(rootPc, iv, n, bassIv, mods.flats, name, sizeof(name));
+
+  // At most 5 notes: with a bass note and a 9th the 5th is the one to leave out.
+  int notes[MAX_CHORD_NOTES + 2];
+  uint8_t cnt = 0;
+  if (bassIv >= 0) notes[cnt++] = (int)baseNote + bassIv - 12;
+  for (uint8_t i = 0; i < n; i++) {
+    if (bassIv >= 0 && n + 1 > MAX_CHORD_NOTES && iv[i] == 7 && n > 3) continue;
+    if (cnt < MAX_CHORD_NOTES) notes[cnt++] = (int)baseNote + iv[i];
+  }
+  for (uint8_t i = 0; i < cnt; i++) {
+    int v = notes[i];
+    while (v > 127) v -= 12;
+    while (v < 0) v += 12;
+    c.notes[c.count++] = (uint8_t)v;
+  }
+  snprintf(c.name, sizeof(c.name), "%s", name);
   return c;
 }
 

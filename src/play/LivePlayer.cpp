@@ -29,6 +29,8 @@ static Held held[layout::KEY_COUNT];
 // note) don't cut each other off: note-off goes out only when the last one lets go.
 static uint8_t refs[16][128];
 static uint8_t inv = 0;
+static uint8_t bankRootPc = 0;
+static uint8_t bankBassMode = 0;
 static char last[16] = "";
 
 // General MIDI drum notes for the 12 pads.
@@ -60,6 +62,9 @@ int drumPadForNote(uint8_t note) {
   return -1;
 }
 uint8_t inversion() { return inv; }
+uint8_t bankRoot() { return bankRootPc; }
+uint8_t bankBass() { return bankBassMode; }
+void bankReset() { bankRootPc = settings.root % 12; bankBassMode = 0; }
 const char* lastPlayed() { return last; }
 bool keySounding(uint8_t k) { return k < layout::KEY_COUNT && held[k].channel != 0; }
 
@@ -137,6 +142,26 @@ static void press(uint8_t k, const layout::KeyDef& def) {
       snprintf(last, sizeof(last), "%s", c.name);
       break;
     }
+    case Role::BankQual: {
+      theory::BankMods mods;
+      mods.seventh = keys::isDown(IDX_SHIFT);
+      mods.ninth = keys::isDown(IDX_CTRL);
+      mods.swap = keys::isDown(IDX_OPT);
+      mods.sus4 = keys::isDown(IDX_ALT);
+      mods.bass = bankBassMode;
+      mods.flats = theory::keyUsesFlats(settings.root, settings.scale);
+      int base = 12 * settings.octave + bankRootPc;  // chords sit an octave below the piano
+      if (base < 0) base += 12;
+      theory::Chord c = theory::buildBankChord(bankRootPc, def.value, (uint8_t)base, mods);
+      if (!c.count) return;
+      h.channel = seq::song.tracks[synthTrack].channel;
+      h.track = synthTrack;
+      h.count = c.count;
+      memcpy(h.notes, c.notes, c.count);
+      for (uint8_t i = 0; i < c.count; i++) startNote(h.track, h.channel, c.notes[i], false, 0);
+      snprintf(last, sizeof(last), "%s", c.name);
+      break;
+    }
     case Role::Drum: {
       uint8_t pad = def.value % 12;
       uint8_t ch, note;
@@ -178,8 +203,17 @@ static void fillPlayed(Played* out, uint8_t k, const layout::KeyDef& def, bool p
 bool onKey(uint8_t k, bool pressed, Played* out) {
   const layout::KeyDef& def = layout::keyAt(k);
   switch (def.role) {
+    case Role::BankRoot:
+      // Picking a root is silent: it is the root of the next chord types you press.
+      if (pressed) {
+        bankRootPc = def.value % 12;
+        snprintf(last, sizeof(last), "root %s", theory::keyUsesFlats(settings.root, settings.scale)
+                                                    ? theory::noteNameFlat(bankRootPc) : theory::noteName(bankRootPc));
+      }
+      return true;
     case Role::Piano:
     case Role::Chord:
+    case Role::BankQual:
     case Role::Drum:
       if (pressed) {
         press(k, def);
@@ -200,6 +234,12 @@ bool onKey(uint8_t k, bool pressed, Played* out) {
         return true;
       }
       if (def.value == layout::ACT_INVERSION) {
+        if (layout::topMode() == layout::TOP_BANK) {
+          bankBassMode = (bankBassMode + 1) % 4;
+          static const char* const B[4] = {"no bass note", "bass: 3rd", "bass: 5th", "bass: 7th"};
+          snprintf(last, sizeof(last), "%s", B[bankBassMode]);
+          return true;
+        }
         inv = (inv + 1) % 3;
         return true;
       }

@@ -37,6 +37,19 @@ void drawKeyMap(M5Canvas& c, int top, bool showCaps) {
           snprintf(label, sizeof(label), "%s",
                    theory::chordButtonLabel(settings.scale, def.value));
           break;
+        case Role::BankRoot: {
+          // roots in the key are bright, the rest dim; the picked root is lit
+          const uint8_t pc = def.value;
+          const bool flats = theory::keyUsesFlats(settings.root, settings.scale);
+          snprintf(label, sizeof(label), "%s", flats ? theory::noteNameFlat(pc) : theory::noteName(pc));
+          bg = pc == player::bankRoot() ? col::ACCENT : col::DRUM;
+          fg = pc == player::bankRoot() ? TFT_BLACK : col::TEXT;
+          break;
+        }
+        case Role::BankQual:
+          bg = col::CHORD;
+          snprintf(label, sizeof(label), "%s", theory::bankQualityLabel(def.value));
+          break;
         case Role::Piano: {
           const uint8_t pc = def.value % 12;
           bool black = (pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10);
@@ -107,7 +120,15 @@ class LiveScreen : public Screen {
              theory::scaleName(settings.scale));
     c.drawString(buf, W - 6, 20);
     c.setTextColor(col::DIM);
-    snprintf(buf, sizeof(buf), "vel %d  inv %d", settings.velocity, player::inversion());
+    if (layout::topMode() == layout::TOP_BANK) {
+      static const char* const B[4] = {"", " /3", " /5", " /7"};
+      snprintf(buf, sizeof(buf), "root %s%s  vel %d",
+               theory::keyUsesFlats(settings.root, settings.scale) ? theory::noteNameFlat(player::bankRoot())
+                                                                   : theory::noteName(player::bankRoot()),
+               B[player::bankBass() & 3], settings.velocity);
+    } else {
+      snprintf(buf, sizeof(buf), "vel %d  inv %d", settings.velocity, player::inversion());
+    }
     c.drawString(buf, W - 6, 32);
 
     c.setTextDatum(top_left);

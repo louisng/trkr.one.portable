@@ -157,6 +157,18 @@ bool Parser::line(const char* text) {
       return false;
     }
     p.events.push_back(e);
+  } else if (cmdIs(text, "sx")) {
+    // `sx <track> <step> <code>`: the step of the cell just above is strummed. Older readers skip it.
+    if (s_.patterns.empty()) return true;
+    long track = strtol(args, &end, 10);
+    long step = strtol(end, &end, 10);
+    long code = strtol(end, &end, 10);
+    if (code < 1 || code > 6) return true;
+    for (auto it = s_.patterns.back().events.rbegin(); it != s_.patterns.back().events.rend(); ++it)
+      if (it->track == track && it->step == step) {
+        if (it->count > 1) it->strum = (uint8_t)code;
+        break;
+      }
   } else if (cmdIs(text, "order")) {
     const char* p = args;
     while (*p && s_.order.size() < MAX_ORDER) {
@@ -231,6 +243,7 @@ void save(Print& out, const Song& s) {
       out.printf("c %u %u %u %u %d", e.track, e.step, e.vel, e.len24, e.delay);
       for (uint8_t k = 0; k < e.count; k++) out.printf(" %u", e.notes[k]);
       out.print('\n');
+      if (e.strum && e.count > 1) out.printf("sx %u %u %u\n", e.track, e.step, e.strum);
     }
   }
   out.print("order");

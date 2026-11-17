@@ -15,9 +15,13 @@ void beginUsb(bool enabled);
 void beginBle(bool enabled);
 void update();  // call every loop: flushes BLE packets, tracks connection changes
 
-void setBleEnabled(bool on);
-// Unload / reload the Bluetooth stack to free RAM for WiFi. resume() restores
-// whatever on/off state Bluetooth MIDI had.
+// Bluetooth MIDI on/off. The stack takes ~56 KB, so "off" really unloads it and
+// "on" loads it again (only if there is room; see bleTakeError). Both happen on a
+// small task so the keys and the clock aren't held up. False = busy switching.
+bool setBleEnabled(bool on);
+bool bleBusy();                 // loading or unloading right now
+const char* bleTakeError();     // why Bluetooth couldn't be switched on (once), or nullptr
+// A cloud job unloads Bluetooth for its RAM and gives it back after (if it was wanted).
 void pauseBle();
 void resumeBle();
 void setUsbEnabled(bool on);

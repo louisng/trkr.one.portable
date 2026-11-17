@@ -1,6 +1,7 @@
 #include "MidiOut.h"
 
 #include <Arduino.h>
+#include <esp_system.h>
 #include "BleMidi.h"
 
 // USB MIDI needs the TinyUSB device stack (ARDUINO_USB_MODE=0). The debug
@@ -35,38 +36,108 @@ void beginUsb(bool enabled) {
 #endif
 }
 
-void beginBle(bool enabled) {
-  blemidi::begin("Cardputer MIDI");
-  blemidi::setEnabled(enabled);
-}
+// ── Bluetooth: really loaded / unloaded ─────────────────────────────────────
+// (The stack holds ~56 KB even while "off" if it stays loaded, so off unloads it.)
+static volatile bool bleLoaded = false;  // the stack is in memory
+static volatile bool bleWanted = false;  // Bluetooth MIDI is switched on
+static volatile bool bleBusy_ = false;   // loading / unloading right now
+static volatile bool bleFailed = false;
+static char bleErr[48] = "";
+static bool blePaused = false;           // a cloud job has it unloaded
+static constexpr uint32_t BLE_NEEDS_BYTES = 72000;  // it took ~56 KB at start-up; keep some in hand
 
-void update() { blemidi::flush(); }
-
-void setBleEnabled(bool on) {
-  if (!on && blemidi::connected()) {
-    for (uint8_t ch = 0; ch < 16; ch++) blemidi::send(0xB0 | ch, 123, 0);
-    blemidi::flush();
+static bool loadBleNow() {
+  if (bleLoaded) {
+    blemidi::setEnabled(true);
+    return true;
   }
-  blemidi::setEnabled(on);
+  const uint32_t freeNow = esp_get_free_heap_size();
+  if (freeNow < BLE_NEEDS_BYTES) {  // a failed allocation here would crash the device
+    snprintf(bleErr, sizeof(bleErr), "No RAM for Bluetooth: %uK free, needs %uK", (unsigned)(freeNow / 1024),
+             (unsigned)(BLE_NEEDS_BYTES / 1024));
+    return false;
+  }
+  blemidi::begin("Cardputer MIDI");
+  blemidi::setEnabled(true);
+  bleLoaded = true;
+  return true;
 }
 
-static bool blePaused = false, bleWasOn = false;
-
-void pauseBle() {
-  if (blePaused) return;
-  bleWasOn = blemidi::enabled();
+static void unloadBleNow() {
+  if (!bleLoaded) return;
   if (blemidi::connected()) {
     for (uint8_t ch = 0; ch < 16; ch++) blemidi::send(0xB0 | ch, 123, 0);
     blemidi::flush();
   }
-  blePaused = blemidi::shutdown();
+  blemidi::setEnabled(false);  // stops advertising, drops connections
+  if (blemidi::shutdown()) bleLoaded = false;  // (false: the connect worker couldn't be stopped safely: stays loaded, off)
+}
+
+static void bleSwitchTask(void* arg) {
+  if ((intptr_t)arg) {
+    if (!loadBleNow()) {
+      bleWanted = false;
+      bleFailed = true;
+    }
+  } else {
+    unloadBleNow();
+  }
+  bleBusy_ = false;
+  vTaskDelete(nullptr);
+}
+
+void beginBle(bool enabled) {  // at start-up: with Bluetooth off the stack isn't loaded at all
+  bleWanted = enabled;
+  if (enabled && !loadBleNow()) {
+    bleWanted = false;
+    bleFailed = true;
+  }
+}
+
+void update() { blemidi::flush(); }
+
+bool bleBusy() { return bleBusy_; }
+
+const char* bleTakeError() {
+  if (!bleFailed) return nullptr;
+  bleFailed = false;
+  return bleErr;
+}
+
+bool setBleEnabled(bool on) {
+  if (bleBusy_) return false;
+  bleWanted = on;
+  if (blePaused) return true;  // applied when the cloud job gives it back
+  if (on == (bool)bleLoaded) {
+    if (on) blemidi::setEnabled(true);
+    return true;
+  }
+  bleBusy_ = true;
+  if (xTaskCreatePinnedToCore(bleSwitchTask, "bleswitch", 8192, (void*)(intptr_t)(on ? 1 : 0), 1, nullptr, 0) != pdPASS) {
+    bleBusy_ = false;
+    bleWanted = false;
+    snprintf(bleErr, sizeof(bleErr), "No RAM for Bluetooth task");
+    bleFailed = true;
+    return false;
+  }
+  return true;
+}
+
+// For a cloud job (runs on the job's own task).
+void pauseBle() {
+  if (blePaused) return;
+  for (int i = 0; i < 1500 && bleBusy_; i++) vTaskDelay(pdMS_TO_TICKS(10));  // a switch in progress
+  blePaused = true;
+  unloadBleNow();
 }
 
 void resumeBle() {
   if (!blePaused) return;
   blePaused = false;
-  blemidi::begin("Cardputer MIDI");
-  blemidi::setEnabled(bleWasOn);
+  if (bleWanted && !loadBleNow()) {
+    bleWanted = false;
+    bleFailed = true;
+  }
 }
 
 void setUsbEnabled(bool on) {
@@ -78,11 +149,12 @@ void setUsbEnabled(bool on) {
   usbOn = on;
 }
 
-bool bleEnabled() { return blemidi::enabled(); }
+bool bleEnabled() { return bleWanted; }
 bool usbEnabled() { return usbOn; }
 
 LinkState bleState() {
-  if (!blemidi::enabled()) return LinkState::Off;
+  if (bleBusy_) return LinkState::Waiting;
+  if (!bleLoaded || !blemidi::enabled()) return LinkState::Off;
   return blemidi::connected() ? LinkState::Connected : LinkState::Waiting;
 }
 

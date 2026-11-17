@@ -2,6 +2,7 @@
 
 #include <M5Cardputer.h>
 #include <freertos/FreeRTOS.h>
+#include <esp_system.h>
 #include <freertos/queue.h>
 #include <freertos/task.h>
 #include <math.h>
@@ -426,10 +427,9 @@ static void send(uint8_t type, uint8_t track, uint8_t note, uint8_t vel) {
   xQueueSend(queue, &c, 0);  // never block the caller; drop if the queue is full
 }
 
-void setEnabled(bool on) {
-  enabled = on;
-  if (!on) M5Cardputer.Speaker.stop(SPK_CH);
-}
+static constexpr uint32_t SPEAKER_NEEDS_BYTES = 30000;  // starting the driver took ~18 KB; keep some in hand
+static bool setEnabledImpl(bool on);
+bool setEnabled(bool on) { return setEnabledImpl(on); }
 void setVolume(uint8_t v) {
   volume = v;
   M5Cardputer.Speaker.setVolume(v);
@@ -443,6 +443,19 @@ void resume() {
   if (!paused) return;
   paused = false;
   for (int i = 0; i < 100 && released; i++) vTaskDelay(pdMS_TO_TICKS(10));  // and to restart it
+}
+
+static bool setEnabledImpl(bool on) {
+  if (!on) {
+    enabled = false;
+    M5Cardputer.Speaker.stop(SPK_CH);
+    pause();  // release the speaker driver: its memory comes back
+    return true;
+  }
+  if (paused && esp_get_free_heap_size() < SPEAKER_NEEDS_BYTES) return false;  // no room to restart it
+  enabled = true;
+  resume();
+  return true;
 }
 void noteOn(uint8_t track, uint8_t note, uint8_t vel) { send(C_ON, track, note, vel); }
 void noteOff(uint8_t track, uint8_t note) {

@@ -32,7 +32,7 @@ USB MIDI sequencer for the Arduboy.
 - **Named songs**: save as many as fit (about 1.5 MB), with names typed on the keyboard;
   Songs screen to load / save over / delete. The song you had open loads at power-on.
 - **Tracker effects**: chance, ratchets, trig conditions, humanize, mod wheel, pitch bend,
-  program change
+  program change, and **strum** (a chord played note by note, like a guitar)
 
 ## Keyboard
 
@@ -110,6 +110,7 @@ classic tracker layout: `q w e r t y u i o p [ ] \` are white keys (C up to A) a
     | `M` | 00–7F | sends mod wheel (CC 1) at the row, even without a note |
     | `B` | 00–7F | sends pitch bend (40 = centre) |
     | `G` | 00–7F | sends a program change |
+    | `S` | 1–6 | strum a chord: 1–3 down (lowest note first), 4–6 up; fast / medium / slow. Each later note is a little softer. Plays the same on trkr.one, which sets it with STRUM buttons in the sequencer. A step with no `S` plays its chord all at once, as always. |
 
     Rows with an effect show its letter on the Step screen too.
   - `'` opens the same track options as the Step screen.
@@ -176,12 +177,14 @@ classic tracker layout: `q w e r t y u i o p [ ] \` are white keys (C up to A) a
     arrangement starts over. Mutes, and channels you changed, carry over to the next song.
   - **Play along:** the piano keys follow the song's chord. `;` `.` choose the rule: chord tones
     only, snapped to the chord, the scale that fits it, or any note.
-  - **Speaker or MIDI, not both.** Building songs needs RAM, so Generated mode releases what the
-    way you are playing doesn't use, and gives it back when you switch it off: with a MIDI device
-    connected the built-in speaker is released (Bluetooth too, unless the device is on
-    Bluetooth); with nothing connected the speaker plays and Bluetooth is unloaded (so you can't
-    connect a Bluetooth device while it runs). The screen also drops to 8-bit colour. The screen
-    says what was switched off. It stops itself when you open a song or start a cloud job.
+  - **You choose what stays on.** Nothing is switched off automatically: if the sound and
+    Bluetooth MIDI are both on and there is enough RAM, both play. If the chosen genre needs more
+    RAM than is free, the screen says so and what to switch off. Those switches really free
+    memory: `fn` + `m` (sound off) releases the speaker driver (~18 KB), `fn` + `b` (Bluetooth MIDI
+    off) unloads the Bluetooth stack (~56 KB; it isn't loaded at start-up when Bluetooth MIDI was
+    left off). Turning either back on loads it again, if there is room (it says if there isn't).
+    USB MIDI has no RAM to free. The screen runs in 8-bit colour while Generated mode runs.
+    It stops itself when you open a song or start a cloud job.
   - Each genre needs a different amount of free RAM (Disco the most, about 61 KB, Ambient the
     least, about 13 KB); the screen shows what the chosen genre needs if there isn't enough.
     When there isn't room to build the next song beside the playing one, the playing song is

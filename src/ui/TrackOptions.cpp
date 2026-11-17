@@ -41,7 +41,7 @@ void formatNoteLengthShort(uint16_t len, char* out, size_t n) {
 
 // ── Effects ──────────────────────────────────────────────────────────────────
 char fxLetter(uint8_t cmd) {
-  static const char L[FX_COUNT] = {'-', 'P', 'R', 'T', 'H', 'M', 'B', 'G'};
+  static const char L[FX_COUNT] = {'-', 'P', 'R', 'T', 'H', 'M', 'B', 'G', 'S'};
   return cmd < FX_COUNT ? L[cmd] : '?';
 }
 
@@ -53,6 +53,7 @@ uint8_t fxDefault(uint8_t cmd) {
     case FX_HUMANIZE: return 16;
     case FX_MOD: return 64;
     case FX_BEND: return 0x40;
+    case FX_STRUM: return 2;  // down, medium
     default: return 0;
   }
 }
@@ -80,6 +81,7 @@ uint8_t fxStepValue(uint8_t cmd, uint8_t val, int dir, bool big) {
   int lo = 0, hi = 127;
   if (cmd == FX_CHANCE) hi = 100;
   if (cmd == FX_RATCHET) { lo = 2; hi = 6; big = false; }
+  if (cmd == FX_STRUM) { lo = 1; hi = 6; big = false; }
   int v = (int)val + dir * (big ? 16 : 1);
   return (uint8_t)(v < lo ? lo : v > hi ? hi : v);
 }
@@ -93,6 +95,12 @@ void fxDescribe(uint8_t cmd, uint8_t val, char* out, size_t n) {
     case FX_MOD: snprintf(out, n, "M: mod wheel = %d", val); break;
     case FX_BEND: snprintf(out, n, "B: pitch bend %+d", (int)val - 64); break;
     case FX_PROGRAM: snprintf(out, n, "G: program change %d", val); break;
+    case FX_STRUM: {
+      static const char* const SPEED[3] = {"fast", "medium", "slow"};
+      if (strumValid(val)) snprintf(out, n, "S: strum %s %s", strumUp(val) ? "up" : "down", SPEED[(val - 1) % 3]);
+      else snprintf(out, n, "S: strum (1-6)");
+      break;
+    }
     default: snprintf(out, n, "No effect"); break;
   }
 }

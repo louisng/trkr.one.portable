@@ -10,7 +10,9 @@
 namespace synth {
 
 void begin();
-void setEnabled(bool on);  // the "speaker" setting
+// The "speaker" setting. Off releases the speaker driver (frees RAM); on starts it
+// again, if there is room (false = not enough memory: it stays off).
+bool setEnabled(bool on);
 void setVolume(uint8_t v); // 0-255
 // Release the speaker driver (frees RAM) while WiFi/TLS runs, then restart it.
 void pause();
