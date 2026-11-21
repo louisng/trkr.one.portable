@@ -31,6 +31,7 @@ USB MIDI sequencer for the Arduboy.
   the arrangement lists scenes in play order (e.g. `1 1 4 3 2 1 1 6`)
 - **Named songs**: save as many as fit (about 1.5 MB), with names typed on the keyboard;
   Songs screen to load / save over / delete. The song you had open loads at power-on.
+- **Play only (fn+j)**: on the Step and Tracker screens the musical keys just play: nothing is entered or recorded until you press fn+j again. The status bar shows JAM. The octave keys (a / k) work as everywhere, in every top-row mode (drums + chords, upper piano, chord bank).
 - **Transpose**: in the track options (`'`), *Transpose* moves this track's pattern a semitone with `,` `/` or an octave with `f` `l`; *Transpose song* moves every pattern of every synth track (drums stay). Single notes move in the Tracker's note column as before. Anything that would leave the MIDI range is refused.
 - **Scenes sync with trkr.one**: scenes that share a part of a track show up on the site as shared (its Scenes view), and a shared part on the site is stored once here.
 - **Sounds sync with trkr.one**: a track's Synth settings (wave, octave, detune, envelope, filter) go to the site and back, so a sound shaped in the browser's cog menu plays here the same way.
