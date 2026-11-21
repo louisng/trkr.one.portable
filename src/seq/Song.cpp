@@ -269,6 +269,42 @@ void setFx(Pattern& p, uint8_t step, uint8_t cmd, uint8_t val) {
   if (cmd != FX_NONE && step < p.length) p.fx.push_back(StepFx{step, cmd, val});
 }
 
+static bool fitsAfter(const Pattern& p, int semis, int step, int* count) {
+  int n = 0;
+  for (const auto& e : p.notes) {
+    if (e.pitch == PITCH_OFF || (step >= 0 && e.step != step)) continue;
+    const int v = (int)e.pitch + semis;
+    if (v < 0 || v > 127) return false;
+    n++;
+  }
+  if (count) *count += n;
+  return true;
+}
+
+bool transposePattern(Pattern& p, int semis, int step) {
+  int n = 0;
+  if (!semis || !fitsAfter(p, semis, step, &n) || !n) return false;
+  for (auto& e : p.notes)
+    if (e.pitch != PITCH_OFF && (step < 0 || e.step == step)) e.pitch = (uint8_t)((int)e.pitch + semis);
+  std::sort(p.notes.begin(), p.notes.end(), lessEv);   // a step's notes stay in pitch order
+  return true;
+}
+
+int transposeSong(Song& s, int semis) {
+  if (!semis) return 0;
+  int n = 0;
+  for (const auto& tr : s.tracks) {
+    if (tr.kind == TrackKind::Drum) continue;
+    for (const auto& p : tr.patterns)
+      if (!fitsAfter(p, semis, -1, &n)) return -1;
+  }
+  for (auto& tr : s.tracks) {
+    if (tr.kind == TrackKind::Drum) continue;
+    for (auto& p : tr.patterns) transposePattern(p, semis);
+  }
+  return n;
+}
+
 bool doublePattern(Pattern& p) {
   if ((int)p.length * 2 > MAX_STEPS) return false;
   const size_t nfx = p.fx.size();

@@ -103,6 +103,16 @@ bool Importer::begin(const Song& in, Meta& meta, const char** error) {
     d.pattern = 0;
     if (drum) seq::defaultInstrument(d.inst, t, true);
     else seq::applyPreset(d.inst, presetFor(s.voice, s.type));
+    if (s.hasInst) {   // the song's own sound settings instead of a preset by name
+      d.inst.sound = s.inst.sound;
+      d.inst.wave = s.inst.wave < seq::WAVE_COUNT ? s.inst.wave : (uint8_t)seq::WAVE_SAW;
+      d.inst.octave = s.inst.octave;
+      d.inst.detune = s.inst.detune;
+      d.inst.attack = s.inst.attack;   d.inst.decay = s.inst.decay;
+      d.inst.sustain = s.inst.sustain; d.inst.release = s.inst.release;
+      d.inst.cutoff = s.inst.cutoff;   d.inst.resonance = s.inst.resonance;
+      d.inst.envMod = s.inst.envMod;
+    }
     d.inst.volume = (uint8_t)clampi(s.vol * 127 / 100, 0, 127);
     memset(&d.drums, 0, sizeof(d.drums));
     seq::drumRoutingGmKit(d.drums);
@@ -316,6 +326,20 @@ bool toWeb(const seq::Song& in, const Meta* meta, const char* name, Song& out, c
     }
   }
 
+  for (uint8_t t = 0; t <= last; t++) {   // the device's sounds go with the song
+    const seq::Instrument& ins = in.tracks[t].inst;
+    Track& d = out.tracks[t];
+    d.hasInst = true;
+    d.inst.sound = ins.sound ? 1 : 0;  d.inst.wave = ins.wave;  d.inst.octave = ins.octave;  d.inst.detune = ins.detune;
+    d.inst.attack = ins.attack;  d.inst.decay = ins.decay;  d.inst.sustain = ins.sustain;  d.inst.release = ins.release;
+    d.inst.cutoff = ins.cutoff;  d.inst.resonance = ins.resonance;  d.inst.envMod = ins.envMod;
+  }
+
+  // Scenes that play the same part of a track share it on the website too: remember where each part was first played.
+  int firstUse[seq::TRACKS][seq::PATTERNS];
+  for (auto& row : firstUse)
+    for (auto& v : row) v = -1;
+  std::vector<uint16_t> patLen;
   uint32_t events = 0;
   for (size_t si = 0; si < specs.size(); si++) {
     const Spec& sp = specs[si];
@@ -326,10 +350,16 @@ bool toWeb(const seq::Song& in, const Meta* meta, const char* name, Song& out, c
     Pattern wp;
     wp.len = len;
     snprintf(wp.name, sizeof(wp.name), "S%u", (unsigned)(si + 1));
+    patLen.push_back(len);
     for (uint8_t t = 0; t <= last; t++) {
       if (sp.pat[t] >= seq::PATTERNS) continue;
       const seq::Pattern& p = in.tracks[t].patterns[sp.pat[t]];
       if (p.length == 0) continue;
+      if (!p.notes.empty()) {
+        int& first = firstUse[t][sp.pat[t]];
+        if (first >= 0 && patLen[first] == len) wp.links.push_back({t, (uint16_t)first});
+        else if (first < 0) first = (int)si;
+      }
       for (uint16_t base = 0; base < len; base += p.length) {  // looping tracks repeat to fill the pattern
         size_t i = 0;
         while (i < p.notes.size()) {

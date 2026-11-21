@@ -55,7 +55,9 @@ static bool adv = false;
 
 // Shortcut keys, looked up by key cap so they follow the layout table.
 static int8_t idxDigit[10];
-static int8_t idxB = -1, idxU = -1, idxM = -1, idxP = -1, idxS = -1, idxT = -1, idxX = -1, idxC = -1, idxW = -1, idxG = -1;
+static int8_t idxB = -1, idxU = -1, idxM = -1, idxP = -1, idxS = -1, idxT = -1, idxX = -1, idxC = -1, idxW = -1, idxG = -1, idxJ = -1;
+// Play only (fn+j): the musical keys play but nothing goes into the song (no step entry, no recording).
+static bool playOnly = false;
 
 static int8_t findCap(const char* cap) {
   for (uint8_t r = 0; r < layout::ROWS; r++)
@@ -159,6 +161,12 @@ static void toggleSpeaker() {
   toast(want ? "Sound on" : "Sound off (RAM freed)");
 }
 
+static void togglePlayOnly() {
+  playOnly = !playOnly;
+  player::releaseAll();
+  toast(playOnly ? "Play only: keys don't write" : "Entering notes again");
+}
+
 static void toggleUpperPiano() {
   player::releaseAll();  // the keys are about to change meaning
   settings.topMode = (settings.topMode + 1) % layout::TOP_MODES;
@@ -206,6 +214,7 @@ static void handleMenuKey(uint8_t idx) {
   else if (idx == idxU) toggleUsb();
   else if (idx == idxM) toggleSpeaker();
   else if (idx == idxP) toggleUpperPiano();
+  else if (idx == idxJ) togglePlayOnly();
   else if (idx == idxS) saveSong();
 }
 
@@ -256,6 +265,7 @@ static void handleFnKey(uint8_t idx) {
   }
   if (idx == idxM) toggleSpeaker();
   else if (idx == idxP) toggleUpperPiano();
+  else if (idx == idxJ) togglePlayOnly();
   else if (idx == idxB) toggleBle();
   else if (idx == idxU) toggleUsb();
   else if (idx == idxS) saveSong();
@@ -326,7 +336,7 @@ static void handleEvent(const keys::Event& e) {
     if (e.pressed && isAction && handleTransport(def.value)) return;
     player::Played played;
     if (player::onKey(e.index, e.pressed, &played)) {
-      if (played.valid) {
+      if (played.valid && !playOnly) {
         if (seq::recording()) {
           if (played.pressed)
             seq::recordPress(e.index, played.track, played.notes, played.count, settings.velocity);
@@ -387,6 +397,12 @@ static void drawStatusBar() {
     canvas.drawString(sp, tx + 11, 7);
   }
 
+  if (playOnly) {   // keys only play
+    canvas.setTextColor(col::CHORD);
+    canvas.setTextDatum(middle_left);
+    canvas.drawString("JAM", tx + (seq::song.songMode ? 36 : 11), 7);
+  }
+
   int x = W - 3 - 24;
   drawPill(x, "SPK", settings.speaker ? midi::LinkState::Connected : midi::LinkState::Off);
   x -= 27;
@@ -431,9 +447,11 @@ static void drawMenu() {
   canvas.drawString(buf, x + 8, y + 82);
   snprintf(buf, sizeof(buf), "p Top: %s", settings.topMode == 1 ? "piano" : settings.topMode == 2 ? "chord bank" : "drum+chd");
   canvas.drawString(buf, x + 110, y + 82);
+  snprintf(buf, sizeof(buf), "j Play only: %s", playOnly ? "ON" : "off");
+  canvas.drawString(buf, x + 8, y + 94);
   canvas.setTextColor(col::DIM);
-  canvas.drawString("fn+ m p b u s: same  fn+1-8: mute", x + 8, y + 94);
-  canvas.drawString("fn+x mute sel  fn+arrows/t tempo", x + 8, y + 103);
+  canvas.drawString("fn+1-8 mute", x + 110, y + 94);
+  canvas.drawString("fn+letter same  x mute  t tempo", x + 8, y + 103);
 }
 
 static void drawToast() {
@@ -533,6 +551,7 @@ void begin() {
   idxC = findCap("c");
   idxW = findCap("w");
   idxG = findCap("g");
+  idxJ = findCap("j");
   applyBtAuto();  // reconnect the remembered Bluetooth device
   layout::setTopMode(settings.topMode);
   lastBle = midi::bleState();

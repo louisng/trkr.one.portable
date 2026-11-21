@@ -118,20 +118,22 @@ enum Opt : uint8_t {
   OPT_BPM,
   OPT_DRUM_MIDI,   // drum tracks: kit on one channel / a channel per drum
   OPT_DRUM_PAGE,   // drum tracks: open the per-drum page
+  OPT_TRANSPOSE,   // synth tracks: move this pattern's notes
+  OPT_TRANSPOSE_ALL,  // every synth track, every pattern
   OPT_COUNT
 };
 static const char* const LABELS[OPT_COUNT] = {"Pattern",   "Length",       "Double it",
                                               "Notes end", "MIDI channel", "Type",
                                               "Mute",      "Tempo",        "Drum MIDI",
-                                              "Each drum..."};
+                                              "Each drum...", "Transpose", "Transpose song"};
 
 static bool isOpenFlag = false;
 static uint8_t sel = 0;  // index into the visible item list
 
 // Items shown for this track (drum tracks swap "Notes end" for drum MIDI routing).
 static uint8_t items(const Track& tr, Opt* out) {
-  static const Opt SYNTH[] = {OPT_PATTERN, OPT_LENGTH, OPT_DOUBLE,  OPT_HOLD,
-                              OPT_CHANNEL, OPT_TYPE,   OPT_MUTE,    OPT_BPM};
+  static const Opt SYNTH[] = {OPT_PATTERN, OPT_LENGTH, OPT_DOUBLE, OPT_TRANSPOSE, OPT_TRANSPOSE_ALL,
+                              OPT_HOLD,    OPT_CHANNEL, OPT_TYPE,  OPT_MUTE,      OPT_BPM};
   static const Opt DRUM[] = {OPT_PATTERN,   OPT_LENGTH,    OPT_DOUBLE, OPT_DRUM_MIDI,
                              OPT_DRUM_PAGE, OPT_CHANNEL,   OPT_TYPE,   OPT_MUTE, OPT_BPM};
   const bool drum = tr.kind == TrackKind::Drum;
@@ -214,6 +216,25 @@ bool onAction(uint8_t a) {
       close();
       goTo(drumMidiScreen());
       break;
+    case OPT_TRANSPOSE:
+    case OPT_TRANSPOSE_ALL: {
+      // , / = a semitone, f / l = an octave
+      const int semis = (d == 16 || d == -16) ? dir * 12 : dir;
+      player::releaseAll();
+      releaseTrack(t);
+      char msg[40];
+      if (list[sel] == OPT_TRANSPOSE) {
+        if (transposePattern(tr.cur(), semis)) snprintf(msg, sizeof(msg), "Pattern %+d semitone%s", semis, semis == 1 || semis == -1 ? "" : "s");
+        else snprintf(msg, sizeof(msg), tr.cur().notes.empty() ? "No notes to move" : "Out of range");
+      } else {
+        for (uint8_t k = 0; k < TRACKS; k++) releaseTrack(k);
+        const int n = transposeSong(song, semis);
+        if (n > 0) snprintf(msg, sizeof(msg), "Song %+d: %d notes moved", semis, n);
+        else snprintf(msg, sizeof(msg), n < 0 ? "Out of range" : "No notes to move");
+      }
+      toast(msg);
+      return true;
+    }
     case OPT_BPM: {
       int b = song.bpm + d;
       song.bpm = (uint16_t)(b < BPM_MIN ? BPM_MIN : b > BPM_MAX ? BPM_MAX : b);
@@ -229,7 +250,9 @@ void draw(M5Canvas& c) {
   Opt list[OPT_COUNT];
   const uint8_t n = items(tr, list);
   if (sel >= n) sel = 0;
-  const int x = 20, y = 15, w = 200, rowH = 10, h = 18 + n * rowH + 12;
+  const uint8_t vis = n < 9 ? n : 9;   // rows that fit on the screen; the list scrolls past that
+  const uint8_t first = sel < vis ? 0 : (uint8_t)(sel - vis + 1);
+  const int x = 20, y = 15, w = 200, rowH = 10, h = 18 + vis * rowH + 12;
   c.fillRoundRect(x, y, w, h, 5, col::BAR);
   c.drawRoundRect(x, y, w, h, 5, col::ACCENT);
   c.setFont(&fonts::Font0);
@@ -238,9 +261,9 @@ void draw(M5Canvas& c) {
   char buf[24];
   snprintf(buf, sizeof(buf), "TRACK %d %s", selectedTrack() + 1, tr.name);
   c.drawString(buf, x + 8, y + 6);
-  for (uint8_t i = 0; i < n; i++) {
+  for (uint8_t i = first; i < first + vis; i++) {
     const Opt o = list[i];
-    int ry = y + 18 + i * rowH;
+    int ry = y + 18 + (i - first) * rowH;
     if (i == sel) c.fillRect(x + 3, ry - 1, w - 6, rowH, col::SELECT);
     c.setTextDatum(top_left);
     c.setTextColor(i == sel ? col::TEXT : col::DIM);
@@ -267,6 +290,8 @@ void draw(M5Canvas& c) {
         else snprintf(buf, sizeof(buf), "ch per drum");
         break;
       case OPT_DRUM_PAGE: snprintf(buf, sizeof(buf), "open >"); break;
+      case OPT_TRANSPOSE: snprintf(buf, sizeof(buf), ", / 1  f/l octave"); break;
+      case OPT_TRANSPOSE_ALL: snprintf(buf, sizeof(buf), "all synth tracks"); break;
       default: buf[0] = 0;
     }
     c.setTextDatum(top_right);
@@ -276,6 +301,10 @@ void draw(M5Canvas& c) {
   c.setTextDatum(top_left);
   c.setTextColor(col::DIM);
   c.drawString(", / change  f/l: bar  ' close", x + 8, y + h - 11);
+  if (n > vis) {   // more above / below
+    c.setTextDatum(top_right);
+    c.drawString(first > 0 ? (first + vis < n ? "^v" : "^") : "v", x + w - 8, y + h - 11);
+  }
 }
 
 }  // namespace options
