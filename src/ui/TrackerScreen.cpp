@@ -100,13 +100,21 @@ class TrackerScreen : public Screen {
       const uint8_t n = stepNotes(p, step, ev, &off);
       if (!n || off) { toast("No note here"); return; }
       bool ok;
+      uint8_t hear[MAX_NOTES_PER_STEP];
+      uint8_t nh = 0;
       if (kindOf(field, nc) == F_NOTE && field < n) {
         const int np = ev[field].pitch + semis;
         ok = np >= 0 && np <= 127 && repitchNote(p, step, ev[field].pitch, (uint8_t)np);
+        if (ok) hear[nh++] = (uint8_t)np;
       } else {
         ok = transposePattern(p, semis, step);
+        if (ok) {   // the whole step: hear all of it
+          const uint8_t m = stepNotes(p, step, ev, &off);
+          for (uint8_t i = 0; i < m; i++) hear[nh++] = ev[i].pitch;
+        }
       }
       if (!ok) toast(tr.kind == TrackKind::Drum ? "Drums: f / l pick the drum" : "Out of range");
+      else player::preview(track, hear, nh);   // hear what it is now
       return;
     }
     switch (a) {
@@ -268,7 +276,10 @@ class TrackerScreen : public Screen {
       case F_NOTE: {
         if ((int)field >= n) return;
         int np = ev[field].pitch + dir * (big ? 12 : 1);
-        if (np >= 0 && np <= 127) repitchNote(p, step, ev[field].pitch, (uint8_t)np);
+        if (np >= 0 && np <= 127 && repitchNote(p, step, ev[field].pitch, (uint8_t)np)) {
+          const uint8_t h = (uint8_t)np;
+          player::preview(track, &h, 1);   // hear the new note
+        }
         break;
       }
       case F_VEL:

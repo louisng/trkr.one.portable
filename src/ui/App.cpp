@@ -602,6 +602,10 @@ void tick() {
   }
 
   uint32_t now = millis();
+  {
+    seq::Lock l;
+    player::previewTick();   // end a note heard after an edit
+  }
   if (const char* e = midi::bleTakeError()) {  // Bluetooth couldn't be loaded (not enough RAM)
     settings.bleMidi = false;
     toast(e);

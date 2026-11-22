@@ -1,5 +1,6 @@
 #include "LivePlayer.h"
 
+#include <Arduino.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -11,6 +12,8 @@
 #include "../music/Theory.h"
 #include "../seq/Engine.h"
 #include "Arp.h"
+
+static constexpr uint8_t MAX_NOTES_PER_STEP_PV = 8;
 
 namespace player {
 
@@ -127,6 +130,29 @@ void setArp(bool on) {
   arpSilence();
 }
 bool arpEnabled() { return arpOn; }
+
+// ── preview: hear an edit ──
+static uint8_t pvNotes[MAX_NOTES_PER_STEP_PV];
+static uint8_t pvCount = 0, pvTrack = 0, pvCh = 0;
+static uint32_t pvEnd = 0;
+static void previewStop() {
+  for (uint8_t i = 0; i < pvCount; i++) stopNote(pvTrack, pvCh, pvNotes[i], false);
+  pvCount = 0;
+}
+void preview(uint8_t track, const uint8_t* notes, uint8_t n, uint16_t ms) {
+  previewStop();
+  if (track >= seq::TRACKS || seq::song.tracks[track].kind == seq::TrackKind::Drum) return;
+  pvTrack = track;
+  pvCh = seq::song.tracks[track].channel;
+  for (uint8_t i = 0; i < n && pvCount < MAX_NOTES_PER_STEP_PV; i++) {
+    pvNotes[pvCount++] = notes[i];
+    startNote(track, pvCh, notes[i], false, 0);
+  }
+  pvEnd = millis() + ms;
+}
+void previewTick() {
+  if (pvCount && (int32_t)(millis() - pvEnd) >= 0) previewStop();
+}
 uint8_t arpPool(uint8_t* out) { return liveArp.pool(out); }
 void arpClear() { liveArp.clear(); }
 bool arpActive() {
@@ -329,6 +355,7 @@ void releaseAll() {
   for (uint8_t k = 0; k < layout::KEY_COUNT; k++) release(k, layout::keyAt(k));
   liveArp.stop();
   arpSilence();
+  previewStop();
 }
 
 }  // namespace player
