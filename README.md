@@ -32,7 +32,7 @@ USB MIDI sequencer for the Arduboy.
 - **Named songs**: save as many as fit (about 1.5 MB), with names typed on the keyboard;
   Songs screen to load / save over / delete. The song you had open loads at power-on.
 - **Arpeggiator**: `fn+a` turns it on: hold piano, chord or chord-bank keys and it plays them one at a time at the song's tempo (with the song stopped too); nothing is entered while it is on. Menu + `a` opens the **Arp** screen: mode (up, down, up/down, up+down, order, random, chord), rate 1/4 to 1/32 with triplets, 1-4 octaves, gate, swing, and hold (latch). The status bar shows ARP.
-- **Arp steps**: the Tracker effect `A` plays a step's notes as an arpeggio across the step's length (set it with `f`/`l` to choose how far it runs): `,` `/` change the mode, with shift the rate and octaves. Same byte as trkr.one's arp steps, synced both ways (`ax` lines).
+- **Arp steps**: the Tracker effect `A` plays a step's notes as an arpeggio across the step's length (the step's length decides how far it runs): on the value, `f`/`l` change the mode, and with `shift` the rate (past the last rate, the octaves). Same byte as trkr.one's arp steps, synced both ways (`ax` lines).
 - **Play only (fn+j)**: on the Step and Tracker screens the musical keys just play: nothing is entered or recorded until you press fn+j again. The status bar shows JAM. The octave keys (a / k) work as everywhere, in every top-row mode (drums + chords, upper piano, chord bank).
 - **Transpose**: in the track options (`'`), *Transpose* moves this track's pattern a semitone with `,` `/` or an octave with `f` `l`; *Transpose song* moves every pattern of every synth track (drums stay). Single notes move in the Tracker's note column as before. Anything that would leave the MIDI range is refused.
 - **Scenes sync with trkr.one**: scenes that share a part of a track show up on the site as shared (its Scenes view), and a shared part on the site is stored once here.
@@ -116,7 +116,7 @@ classic tracker layout: `q w e r t y u i o p [ ] \` are white keys (C up to A) a
     | `M` | 00–7F | sends mod wheel (CC 1) at the row, even without a note |
     | `B` | 00–7F | sends pitch bend (40 = centre) |
     | `G` | 00–7F | sends a program change |
-    | `A` | mode, rate, octaves | arpeggiate the step's notes across its length at the song tempo (, / mode; shift + , / rate, then octaves) |
+    | `A` | mode, rate, octaves | arpeggiate the step's notes across its length at the song tempo (`f`/`l`: mode; `shift`+`f`/`l`: rate, then octaves) |
     | `S` | 1–6 | strum a chord: 1–3 down (lowest note first), 4–6 up; fast / medium / slow. Each later note is a little softer. Plays the same on trkr.one, which sets it with STRUM buttons in the sequencer. A step with no `S` plays its chord all at once, as always. |
 
     Rows with an effect show its letter on the Step screen too.
