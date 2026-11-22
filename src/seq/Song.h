@@ -49,6 +49,7 @@ enum FxCmd : uint8_t {
   FX_BEND,      // B xx: sends pitch bend, 40 = centre
   FX_PROGRAM,   // G xx: sends program change xx
   FX_STRUM,     // S n: strum the step's notes like a guitar. n = 1-3 down, 4-6 up; fast / medium / slow
+  FX_ARP,       // A xx: play the step's notes as an arpeggio across its length (play/Arp.h: mode, rate, octaves)
   FX_COUNT
 };
 
@@ -183,6 +184,12 @@ void setPatternLength(Pattern& p, uint8_t length);  // drops notes past the end
 // Double the pattern: length x2 with the notes copied into the new half.
 // Returns false if it would exceed MAX_STEPS.
 bool doublePattern(Pattern& p);
+// Move notes by `semis` semitones: one step (step >= 0) or the whole pattern. Note-offs stay put.
+// Changes nothing and returns false if a note would leave 0-127 (or there is nothing to move).
+bool transposePattern(Pattern& p, int semis, int step = -1);
+// Every pattern of every synth track (drum tracks are drums, not pitches). Returns the notes moved,
+// or -1 if a note would leave 0-127 (then nothing changes).
+int transposeSong(Song& s, int semis);
 // Put a note-off on a step (replacing its notes).
 void setStepOff(Pattern& p, uint8_t step);
 bool isOffStep(const Pattern& p, uint8_t step);

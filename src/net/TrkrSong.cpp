@@ -119,6 +119,28 @@ bool Parser::line(const char* text) {
     v1 = strtol(args, &end, 10);
     v2 = strtol(end, nullptr, 10);
     if (v1 >= 0 && v1 < s_.trackCount) s_.tracks[v1].strum = (uint8_t)constrain(v2, 0, 12);
+  } else if (cmdIs(text, "ti")) {
+    // `ti <track> <sound> <wave> <octave> <detune> <attack> <decay> <sustain> <release> <cutoff> <resonance> <envMod>`
+    long v[12];
+    const char* p = args;
+    int n = 0;
+    while (n < 12) {
+      char* after;
+      v[n] = strtol(p, &after, 10);
+      if (after == p) break;
+      p = after;
+      n++;
+    }
+    if (n < 12 || v[0] < 0 || v[0] >= s_.trackCount) return true;
+    Track& t = s_.tracks[v[0]];
+    auto u8 = [&](long x, long hi) { return (uint8_t)constrain(x, 0L, hi); };
+    t.inst.sound = v[1] ? 1 : 0;
+    t.inst.wave = u8(v[2], 5);
+    t.inst.octave = (int8_t)constrain(v[3], -12L, 12L);
+    t.inst.detune = u8(v[4], 127);  t.inst.attack = u8(v[5], 127);  t.inst.decay = u8(v[6], 127);
+    t.inst.sustain = u8(v[7], 127); t.inst.release = u8(v[8], 127); t.inst.cutoff = u8(v[9], 127);
+    t.inst.resonance = u8(v[10], 127); t.inst.envMod = u8(v[11], 127);
+    t.hasInst = true;
   } else if (cmdIs(text, "pattern")) {
     if (s_.patterns.size() >= MAX_PATTERNS) {
       err_ = "too many patterns";
@@ -157,6 +179,27 @@ bool Parser::line(const char* text) {
       return false;
     }
     p.events.push_back(e);
+  } else if (cmdIs(text, "ax")) {
+    // `ax <track> <step> <code>`: that cell plays as an arpeggio across its length
+    if (s_.patterns.empty()) return true;
+    Pattern& p = s_.patterns.back();
+    long track = strtol(args, &end, 10);
+    long step = strtol(end, &end, 10);
+    long code = strtol(end, &end, 10);
+    if (track < 0 || track >= s_.trackCount || step < 0 || step >= p.len || code < 0 || code > 255) return true;
+    if ((code & 7) >= 6 || ((code >> 3) & 7) >= 6) return true;   // not a valid arp byte
+    for (const auto& e : p.events)
+      if (e.track == track && e.step == step) {
+        p.arps.push_back({(uint8_t)track, (uint8_t)step, (uint8_t)code});
+        break;
+      }
+  } else if (cmdIs(text, "lk")) {
+    // `lk <track> <pattern>`: this pattern's track is the same part as that earlier pattern's
+    if (s_.patterns.empty()) return true;
+    long track = strtol(args, &end, 10);
+    long from = strtol(end, &end, 10);
+    if (track >= 0 && track < s_.trackCount && from >= 0 && from < (long)s_.patterns.size() - 1)
+      s_.patterns.back().links.push_back({(uint8_t)track, (uint16_t)from});
   } else if (cmdIs(text, "sx")) {
     // `sx <track> <step> <code>`: the step of the cell just above is strummed. Older readers skip it.
     if (s_.patterns.empty()) return true;
@@ -237,6 +280,12 @@ void save(Print& out, const Song& s) {
   }
   for (uint8_t i = 0; i < s.trackCount; i++)
     if (s.tracks[i].strum) out.printf("strum %u %u\n", i, s.tracks[i].strum);
+  for (uint8_t i = 0; i < s.trackCount; i++) {
+    const Track& t = s.tracks[i];
+    if (!t.hasInst) continue;
+    out.printf("ti %u %u %u %d %u %u %u %u %u %u %u %u\n", i, t.inst.sound, t.inst.wave, (int)t.inst.octave, t.inst.detune,
+               t.inst.attack, t.inst.decay, t.inst.sustain, t.inst.release, t.inst.cutoff, t.inst.resonance, t.inst.envMod);
+  }
   for (const auto& p : s.patterns) {
     out.printf("pattern %u %s\n", p.len, p.name[0] ? p.name : "-");
     for (const auto& e : p.events) {
@@ -245,6 +294,8 @@ void save(Print& out, const Song& s) {
       out.print('\n');
       if (e.strum && e.count > 1) out.printf("sx %u %u %u\n", e.track, e.step, e.strum);
     }
+    for (const auto& a : p.arps) out.printf("ax %u %u %u\n", a.track, a.step, a.code);
+    for (const auto& l : p.links) out.printf("lk %u %u\n", l.first, (unsigned)l.second);
   }
   out.print("order");
   for (uint8_t pi : s.order) out.printf(" %u", pi);

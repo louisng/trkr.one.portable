@@ -45,6 +45,8 @@ class Screen {
   virtual void onPlayed(uint8_t key, const player::Played& p) {}
   // Every raw key event, before anything else handles it.
   virtual void onRawKey(uint8_t index, bool pressed) {}
+  // fn+e: put the arp (these notes, these settings) on the step at the cursor. False: this screen has no steps.
+  virtual bool placeArp(const uint8_t* notes, uint8_t n, uint8_t code) { return false; }
   // Return true to take a key for this screen before the app's own handling
   // (transport, live playing). Used where enter / space mean something else.
   virtual bool consumeKey(uint8_t index, bool pressed) { return false; }
@@ -60,6 +62,7 @@ Screen* songsScreen();
 Screen* scenesScreen();
 Screen* arrangeScreen();
 Screen* synthScreen();
+Screen* arpScreen();
 Screen* drumMidiScreen();
 Screen* connectScreen();
 Screen* cloudScreen();

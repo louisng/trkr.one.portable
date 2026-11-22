@@ -31,6 +31,13 @@ USB MIDI sequencer for the Arduboy.
   the arrangement lists scenes in play order (e.g. `1 1 4 3 2 1 1 6`)
 - **Named songs**: save as many as fit (about 1.5 MB), with names typed on the keyboard;
   Songs screen to load / save over / delete. The song you had open loads at power-on.
+- **Arpeggiator**: `fn+a` turns it on: hold piano, chord or chord-bank keys and it plays them one at a time at the song's tempo (with the song stopped too); nothing is entered while it is on. Menu + `a` opens the **Arp** screen: mode (up, down, up/down, up+down, order, random, chord), rate 1/4 to 1/32 with triplets, 1-4 octaves, gate, swing, and hold (latch: every key you press joins the held notes, in the order pressed, and keeps playing; `del` lets go of them all). **Order** plays them in the order pressed. The status bar shows ARP.
+- **Put the arp on a step (fn+e)**: on the Step or Tracker screen, `fn+e` writes the arp onto the step at the cursor: the notes it is holding (its first 4) and its mode, rate and octaves as the step's `A` effect, one round of the arpeggio long. With no notes held it arpeggiates the chord already on the step. Only that step changes: the rest of the pattern stays normal notes, strums or other arps.
+- **Arp steps**: the Tracker effect `A` plays a step's notes as an arpeggio across the step's length (the step's length decides how far it runs): on the value, `f`/`l` change the mode, and with `shift` the rate (past the last rate, the octaves). Same byte as trkr.one's arp steps, synced both ways (`ax` lines).
+- **Play only (fn+j)**: on the Step and Tracker screens the musical keys just play: nothing is entered or recorded until you press fn+j again. The status bar shows JAM. The octave keys (a / k) work as everywhere, in every top-row mode (drums + chords, upper piano, chord bank).
+- **Transpose**: in the track options (`'`), *Transpose* moves this track's pattern a semitone with `,` `/` or an octave with `f` `l`; *Transpose song* moves every pattern of every synth track (drums stay). Single notes move in the Tracker's note column as before. Anything that would leave the MIDI range is refused.
+- **Scenes sync with trkr.one**: scenes that share a part of a track show up on the site as shared (its Scenes view), and a shared part on the site is stored once here.
+- **Sounds sync with trkr.one**: a track's Synth settings (wave, octave, detune, envelope, filter) go to the site and back, so a sound shaped in the browser's cog menu plays here the same way.
 - **Tracker effects**: chance, ratchets, trig conditions, humanize, mod wheel, pitch bend,
   program change, and **strum** (a chord played note by note, like a guitar)
 
@@ -92,6 +99,12 @@ classic tracker layout: `q w e r t y u i o p [ ] \` are white keys (C up to A) a
   - Piano / chord / drum keys write at the cursor and move down a row (hold one key and
     press more to stack a chord). On an existing chord, a single key replaces the note in
     the column the cursor is on.
+  - `ctrl` + arrows change whatever the cursor is on (`,` `/` a little, `;` `.` more):
+    - a note: a semitone / an octave, and you hear it as it will play (drums: `,` `/` the previous / next drum)
+    - a blank row: any arrow puts in the last note or chord you played (middle C, or a kick, if none yet)
+    - velocity: 1 / 10 · length: the next length / a bar · offset: 1 / 3 ticks
+    - an effect's value: 1 / 10; a strum: `,` `/` the next strum, `;` `.` up ↔ down; an arp: `,` `/` the mode, `;` `.` the rate
+    - the effect letter: nothing (`f`/`l` choose the effect)
   - `f`/`l` turn the value under the cursor down / up: note ±1 semitone, velocity ±1,
     length through ¼ ½ 1 2 3… steps, offset ±1 tick. Hold `shift` for bigger jumps
     (octave, ±16 velocity, ±1 bar of length).
@@ -110,6 +123,7 @@ classic tracker layout: `q w e r t y u i o p [ ] \` are white keys (C up to A) a
     | `M` | 00–7F | sends mod wheel (CC 1) at the row, even without a note |
     | `B` | 00–7F | sends pitch bend (40 = centre) |
     | `G` | 00–7F | sends a program change |
+    | `A` | mode, rate, octaves | arpeggiate the step's notes across its length at the song tempo (`f`/`l`: mode; `shift`+`f`/`l`: rate, then octaves) |
     | `S` | 1–6 | strum a chord: 1–3 down (lowest note first), 4–6 up; fast / medium / slow. Each later note is a little softer. Plays the same on trkr.one, which sets it with STRUM buttons in the sequencer. A step with no `S` plays its chord all at once, as always. |
 
     Rows with an effect show its letter on the Step screen too.

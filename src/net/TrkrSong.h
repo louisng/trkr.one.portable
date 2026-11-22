@@ -27,6 +27,14 @@ struct Track {
   uint8_t vol = 80;    // 0-100
   bool mute = false;
   uint8_t strum = 0;   // spread chord notes over this many 1/24 steps
+  // The track's built-in sound (the Synth screen), when the song says: a `ti` line. Otherwise the
+  // sound comes from `voice`. Volume is `vol`'s. octave is signed.
+  bool hasInst = false;
+  struct Inst {
+    uint8_t sound = 1, wave = 0;
+    int8_t octave = 0;
+    uint8_t detune = 0, attack = 0, decay = 0, sustain = 0, release = 0, cutoff = 0, resonance = 0, envMod = 0;
+  } inst;
 };
 
 // One note (or chord) in a pattern.
@@ -45,6 +53,13 @@ struct Pattern {
   uint16_t len = 16;
   char name[12] = "";
   std::vector<Event> events;  // sorted by step
+  // Tracks that play the same part as an earlier pattern's (a scene sharing a part): {track, that pattern}.
+  // An `lk` line; the notes are listed in full anyway, so it only says they are one part.
+  std::vector<std::pair<uint8_t, uint16_t>> links;
+  // Arpeggiated cells (an `ax` line): {track, step, the arp byte (play/Arp.h)}. Kept apart from the
+  // events so a song without arps costs nothing.
+  struct StepArp { uint8_t track, step, code; };
+  std::vector<StepArp> arps;
 };
 
 struct Song {

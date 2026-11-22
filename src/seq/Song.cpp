@@ -151,10 +151,27 @@ bool hasNote(const Pattern& p, uint8_t step, uint8_t pitch) {
   return false;
 }
 
-void clearStep(Pattern& p, uint8_t step) {
+static void clearNotesOnly(Pattern& p, uint8_t step) {
   p.notes.erase(std::remove_if(p.notes.begin(), p.notes.end(),
                                [step](const NoteEvent& e) { return e.step == step; }),
                 p.notes.end());
+}
+
+// A step that has no notes left loses the effects that only shape notes (strum, arp, chance,
+// ratchet, trig condition, humanize). Mod wheel, pitch bend and program change stay: they work
+// without a note.
+static void dropNoteFx(Pattern& p, uint8_t step) {
+  for (const auto& e : p.notes)
+    if (e.step == step && e.pitch != PITCH_OFF) return;   // still has notes
+  uint8_t cmd = FX_NONE;
+  if (!fxAt(p, step, &cmd, nullptr)) return;
+  if (cmd == FX_MOD || cmd == FX_BEND || cmd == FX_PROGRAM) return;
+  setFx(p, step, FX_NONE, 0);
+}
+
+void clearStep(Pattern& p, uint8_t step) {
+  clearNotesOnly(p, step);
+  dropNoteFx(p, step);
 }
 
 bool addNote(Pattern& p, const NoteEvent& e) {
@@ -168,15 +185,17 @@ bool addNote(Pattern& p, const NoteEvent& e) {
 
 void setStep(Pattern& p, uint8_t step, const uint8_t* pitches, uint8_t count, uint8_t vel,
              uint16_t len) {
-  clearStep(p, step);
+  clearNotesOnly(p, step);   // new notes on a step keep its strum / arp
   for (uint8_t i = 0; i < count && i < MAX_NOTES_PER_STEP; i++)
     addNote(p, NoteEvent{step, 0, pitches[i], vel, len, 0});
+  dropNoteFx(p, step);
 }
 
 bool toggleNote(Pattern& p, uint8_t step, uint8_t pitch, uint8_t vel, uint16_t len) {
   for (auto it = p.notes.begin(); it != p.notes.end(); ++it) {
     if (it->step == step && it->pitch == pitch) {
       p.notes.erase(it);
+      dropNoteFx(p, step);
       return false;
     }
   }
@@ -218,6 +237,7 @@ bool removeNote(Pattern& p, uint8_t step, uint8_t pitch) {
   for (auto it = p.notes.begin(); it != p.notes.end(); ++it)
     if (it->step == step && it->pitch == pitch) {
       p.notes.erase(it);
+      dropNoteFx(p, step);
       return true;
     }
   return false;
@@ -269,6 +289,42 @@ void setFx(Pattern& p, uint8_t step, uint8_t cmd, uint8_t val) {
   if (cmd != FX_NONE && step < p.length) p.fx.push_back(StepFx{step, cmd, val});
 }
 
+static bool fitsAfter(const Pattern& p, int semis, int step, int* count) {
+  int n = 0;
+  for (const auto& e : p.notes) {
+    if (e.pitch == PITCH_OFF || (step >= 0 && e.step != step)) continue;
+    const int v = (int)e.pitch + semis;
+    if (v < 0 || v > 127) return false;
+    n++;
+  }
+  if (count) *count += n;
+  return true;
+}
+
+bool transposePattern(Pattern& p, int semis, int step) {
+  int n = 0;
+  if (!semis || !fitsAfter(p, semis, step, &n) || !n) return false;
+  for (auto& e : p.notes)
+    if (e.pitch != PITCH_OFF && (step < 0 || e.step == step)) e.pitch = (uint8_t)((int)e.pitch + semis);
+  std::sort(p.notes.begin(), p.notes.end(), lessEv);   // a step's notes stay in pitch order
+  return true;
+}
+
+int transposeSong(Song& s, int semis) {
+  if (!semis) return 0;
+  int n = 0;
+  for (const auto& tr : s.tracks) {
+    if (tr.kind == TrackKind::Drum) continue;
+    for (const auto& p : tr.patterns)
+      if (!fitsAfter(p, semis, -1, &n)) return -1;
+  }
+  for (auto& tr : s.tracks) {
+    if (tr.kind == TrackKind::Drum) continue;
+    for (auto& p : tr.patterns) transposePattern(p, semis);
+  }
+  return n;
+}
+
 bool doublePattern(Pattern& p) {
   if ((int)p.length * 2 > MAX_STEPS) return false;
   const size_t nfx = p.fx.size();
@@ -291,7 +347,7 @@ bool doublePattern(Pattern& p) {
 }
 
 void setStepOff(Pattern& p, uint8_t step) {
-  clearStep(p, step);
+  clearStep(p, step);   // an OFF has no notes to shape
   if (step < p.length) addNote(p, NoteEvent{step, 0, PITCH_OFF, 0, 1, 0});
 }
 
