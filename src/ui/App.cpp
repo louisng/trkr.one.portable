@@ -55,7 +55,7 @@ static bool adv = false;
 
 // Shortcut keys, looked up by key cap so they follow the layout table.
 static int8_t idxDigit[10];
-static int8_t idxB = -1, idxU = -1, idxM = -1, idxP = -1, idxS = -1, idxT = -1, idxX = -1, idxC = -1, idxW = -1, idxG = -1, idxJ = -1;
+static int8_t idxB = -1, idxU = -1, idxM = -1, idxP = -1, idxS = -1, idxT = -1, idxX = -1, idxC = -1, idxW = -1, idxG = -1, idxJ = -1, idxA = -1;
 // Play only (fn+j): the musical keys play but nothing goes into the song (no step entry, no recording).
 static bool playOnly = false;
 
@@ -161,6 +161,12 @@ static void toggleSpeaker() {
   toast(want ? "Sound on" : "Sound off (RAM freed)");
 }
 
+static void toggleArp() {
+  seq::Lock l;
+  player::setArp(!player::arpEnabled());
+  toast(player::arpEnabled() ? "Arp on: hold keys (menu+a: settings)" : "Arp off");
+}
+
 static void togglePlayOnly() {
   playOnly = !playOnly;
   player::releaseAll();
@@ -215,6 +221,7 @@ static void handleMenuKey(uint8_t idx) {
   else if (idx == idxM) toggleSpeaker();
   else if (idx == idxP) toggleUpperPiano();
   else if (idx == idxJ) togglePlayOnly();
+  else if (idx == idxA) switchTo(arpScreen());
   else if (idx == idxS) saveSong();
 }
 
@@ -266,6 +273,7 @@ static void handleFnKey(uint8_t idx) {
   if (idx == idxM) toggleSpeaker();
   else if (idx == idxP) toggleUpperPiano();
   else if (idx == idxJ) togglePlayOnly();
+  else if (idx == idxA) toggleArp();
   else if (idx == idxB) toggleBle();
   else if (idx == idxU) toggleUsb();
   else if (idx == idxS) saveSong();
@@ -397,10 +405,10 @@ static void drawStatusBar() {
     canvas.drawString(sp, tx + 11, 7);
   }
 
-  if (playOnly) {   // keys only play
+  if (playOnly || player::arpEnabled()) {   // keys only play (JAM), or feed the arp (ARP)
     canvas.setTextColor(col::CHORD);
     canvas.setTextDatum(middle_left);
-    canvas.drawString("JAM", tx + (seq::song.songMode ? 36 : 11), 7);
+    canvas.drawString(player::arpEnabled() ? "ARP" : "JAM", tx + (seq::song.songMode ? 36 : 11), 7);
   }
 
   int x = W - 3 - 24;
@@ -449,9 +457,10 @@ static void drawMenu() {
   canvas.drawString(buf, x + 110, y + 82);
   snprintf(buf, sizeof(buf), "j Play only: %s", playOnly ? "ON" : "off");
   canvas.drawString(buf, x + 8, y + 94);
+  snprintf(buf, sizeof(buf), "a Arp: %s", player::arpEnabled() ? "ON" : "set");
+  canvas.drawString(buf, x + 110, y + 94);
   canvas.setTextColor(col::DIM);
-  canvas.drawString("fn+1-8 mute", x + 110, y + 94);
-  canvas.drawString("fn+letter same  x mute  t tempo", x + 8, y + 103);
+  canvas.drawString("fn+j/a toggle  1-8 mute  t tempo", x + 8, y + 103);
 }
 
 static void drawToast() {
@@ -552,6 +561,7 @@ void begin() {
   idxW = findCap("w");
   idxG = findCap("g");
   idxJ = findCap("j");
+  idxA = findCap("a");
   applyBtAuto();  // reconnect the remembered Bluetooth device
   layout::setTopMode(settings.topMode);
   lastBle = midi::bleState();

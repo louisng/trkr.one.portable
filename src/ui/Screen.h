@@ -60,6 +60,7 @@ Screen* songsScreen();
 Screen* scenesScreen();
 Screen* arrangeScreen();
 Screen* synthScreen();
+Screen* arpScreen();
 Screen* drumMidiScreen();
 Screen* connectScreen();
 Screen* cloudScreen();

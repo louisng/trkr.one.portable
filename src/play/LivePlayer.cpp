@@ -10,6 +10,7 @@
 #include "../midi/MidiOut.h"
 #include "../music/Theory.h"
 #include "../seq/Engine.h"
+#include "Arp.h"
 
 namespace player {
 
@@ -21,7 +22,8 @@ struct Held {
   uint8_t count;
   uint8_t notes[theory::MAX_CHORD_NOTES];  // as stored in the song (drums: lane id)
   bool drum;
-  uint8_t drumOut;  // drums: the MIDI note actually sent (see the track's drum routing)
+  uint8_t drumOut;
+  bool arp;        // the notes went to the arpeggiator, not straight out  // drums: the MIDI note actually sent (see the track's drum routing)
 };
 
 static Held held[layout::KEY_COUNT];
@@ -106,6 +108,62 @@ int pianoNoteFor(uint8_t semitone) {
 static NoteFilter noteFilter = nullptr;
 void setNoteFilter(NoteFilter f) { noteFilter = f; }
 
+// ── the live arpeggiator ──
+static arp::Live liveArp;
+static bool arpOn = false;
+static uint32_t arpTick = 0, arpNext = 0;
+struct ArpNote { bool used, started; uint8_t ch, track, note; uint32_t on, off; };
+static ArpNote arpNotes[16];
+
+static void arpSilence() {
+  for (auto& a : arpNotes) {
+    if (a.used && a.started) stopNote(a.track, a.ch, a.note, false);
+    a.used = false;
+  }
+}
+void setArp(bool on) {
+  arpOn = on;
+  liveArp.stop();
+  arpSilence();
+}
+bool arpEnabled() { return arpOn; }
+bool arpActive() {
+  if (!arpOn) return false;
+  if (liveArp.running()) return true;
+  for (const auto& a : arpNotes) if (a.used) return true;
+  return false;
+}
+void arpClock() {
+  if (!arpOn) return;
+  arpTick++;
+  for (auto& a : arpNotes) {   // notes due to start (swing makes some late) or to stop (gate)
+    if (!a.used) continue;
+    if (!a.started && (int32_t)(arpTick - a.on) >= 0) { startNote(a.track, a.ch, a.note, false, 0); a.started = true; }
+    if (a.started && (int32_t)(arpTick - a.off) >= 0) { stopNote(a.track, a.ch, a.note, false); a.used = false; }
+  }
+  liveArp.mode = settings.arpMode; liveArp.rate = settings.arpRate; liveArp.octaves = settings.arpOctaves;
+  liveArp.gate = settings.arpGate; liveArp.swing = settings.arpSwing;
+  if (liveArp.hold != settings.arpHold) liveArp.setHold(settings.arpHold);
+  if (!liveArp.running()) { arpNext = arpTick; return; }   // the first note plays as soon as a key goes down
+  if ((int32_t)(arpTick - arpNext) < 0) return;
+  uint8_t out[16];
+  const uint8_t n = liveArp.step(out);
+  const uint8_t late = liveArp.swingTicks(), len = liveArp.gateTicks();
+  const uint8_t tr = seq::liveSynthTrack();
+  const uint8_t ch = seq::song.tracks[tr].channel;
+  for (uint8_t i = 0; i < n; i++)
+    for (auto& a : arpNotes)
+      if (!a.used) { a = {true, false, ch, tr, out[i], arpTick + late, arpTick + late + len}; break; }
+  if (n) {
+    if (n == 1) theory::formatNote(out[0], last);
+    else snprintf(last, sizeof(last), "arp %u notes", n);
+  }
+  arpNext = arpTick + arp::rateTicks(liveArp.rate);
+  // start the ones due right now
+  for (auto& a : arpNotes)
+    if (a.used && !a.started && (int32_t)(arpTick - a.on) >= 0) { startNote(a.track, a.ch, a.note, false, 0); a.started = true; }
+}
+
 static void press(uint8_t k, const layout::KeyDef& def) {
   Held& h = held[k];
   if (h.channel) return;  // already sounding
@@ -118,7 +176,8 @@ static void press(uint8_t k, const layout::KeyDef& def) {
       if (n >= 0 && noteFilter) n = noteFilter(n);
       if (n < 0 || n > 127) return;
       h = {seq::song.tracks[synthTrack].channel, synthTrack, 1, {(uint8_t)n}};
-      startNote(h.track, h.channel, (uint8_t)n, false, 0);
+      if (arpOn) { h.arp = true; liveArp.press((uint8_t)n); }   // the arp plays it
+      else startNote(h.track, h.channel, (uint8_t)n, false, 0);
       theory::formatNote((uint8_t)n, last);
       break;
     }
@@ -138,7 +197,11 @@ static void press(uint8_t k, const layout::KeyDef& def) {
       h.track = synthTrack;
       h.count = c.count;
       memcpy(h.notes, c.notes, c.count);
-      for (uint8_t i = 0; i < c.count; i++) startNote(h.track, h.channel, c.notes[i], false, 0);
+      h.arp = arpOn;
+      for (uint8_t i = 0; i < c.count; i++) {
+        if (arpOn) liveArp.press(c.notes[i]);
+        else startNote(h.track, h.channel, c.notes[i], false, 0);
+      }
       snprintf(last, sizeof(last), "%s", c.name);
       break;
     }
@@ -158,7 +221,11 @@ static void press(uint8_t k, const layout::KeyDef& def) {
       h.track = synthTrack;
       h.count = c.count;
       memcpy(h.notes, c.notes, c.count);
-      for (uint8_t i = 0; i < c.count; i++) startNote(h.track, h.channel, c.notes[i], false, 0);
+      h.arp = arpOn;
+      for (uint8_t i = 0; i < c.count; i++) {
+        if (arpOn) liveArp.press(c.notes[i]);
+        else startNote(h.track, h.channel, c.notes[i], false, 0);
+      }
       snprintf(last, sizeof(last), "%s", c.name);
       break;
     }
@@ -180,6 +247,13 @@ static void release(uint8_t k, const layout::KeyDef& def) {
   Held& h = held[k];
   if (!h.channel) return;
   (void)def;
+  if (h.arp) {
+    for (uint8_t i = 0; i < h.count; i++) liveArp.release(h.notes[i]);
+    h.arp = false;
+    h.channel = 0;
+    h.count = 0;
+    return;
+  }
   if (h.drum) stopNote(h.track, h.channel, h.drumOut, true);
   else
     for (uint8_t i = 0; i < h.count; i++) stopNote(h.track, h.channel, h.notes[i], false);
@@ -191,7 +265,7 @@ static void release(uint8_t k, const layout::KeyDef& def) {
 static void fillPlayed(Played* out, uint8_t k, const layout::KeyDef& def, bool pressed) {
   if (!out) return;
   const Held& h = held[k];
-  out->valid = h.channel != 0;
+  out->valid = h.channel != 0 && !h.arp;   // what the arp plays is never entered or recorded
   out->pressed = pressed;
   out->role = def.role;
   out->track = h.track;
@@ -251,6 +325,8 @@ bool onKey(uint8_t k, bool pressed, Played* out) {
 
 void releaseAll() {
   for (uint8_t k = 0; k < layout::KEY_COUNT; k++) release(k, layout::keyAt(k));
+  liveArp.stop();
+  arpSilence();
 }
 
 }  // namespace player

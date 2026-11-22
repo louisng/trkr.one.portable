@@ -179,6 +179,20 @@ bool Parser::line(const char* text) {
       return false;
     }
     p.events.push_back(e);
+  } else if (cmdIs(text, "ax")) {
+    // `ax <track> <step> <code>`: that cell plays as an arpeggio across its length
+    if (s_.patterns.empty()) return true;
+    Pattern& p = s_.patterns.back();
+    long track = strtol(args, &end, 10);
+    long step = strtol(end, &end, 10);
+    long code = strtol(end, &end, 10);
+    if (track < 0 || track >= s_.trackCount || step < 0 || step >= p.len || code < 0 || code > 255) return true;
+    if ((code & 7) >= 6 || ((code >> 3) & 7) >= 6) return true;   // not a valid arp byte
+    for (const auto& e : p.events)
+      if (e.track == track && e.step == step) {
+        p.arps.push_back({(uint8_t)track, (uint8_t)step, (uint8_t)code});
+        break;
+      }
   } else if (cmdIs(text, "lk")) {
     // `lk <track> <pattern>`: this pattern's track is the same part as that earlier pattern's
     if (s_.patterns.empty()) return true;
@@ -280,6 +294,7 @@ void save(Print& out, const Song& s) {
       out.print('\n');
       if (e.strum && e.count > 1) out.printf("sx %u %u %u\n", e.track, e.step, e.strum);
     }
+    for (const auto& a : p.arps) out.printf("ax %u %u %u\n", a.track, a.step, a.code);
     for (const auto& l : p.links) out.printf("lk %u %u\n", l.first, (unsigned)l.second);
   }
   out.print("order");

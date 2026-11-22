@@ -10,6 +10,7 @@
 #include "../audio/Synth.h"
 #include "../input/KeyLayout.h"
 #include "../midi/MidiOut.h"
+#include "../play/Arp.h"
 #include "../play/LivePlayer.h"
 
 namespace seq {
@@ -132,6 +133,20 @@ static void startNote(uint8_t t, const Track& tr, const NoteEvent& e, uint32_t t
   *slot = {true, held, t, ch, note, drum, tick + (e.len ? e.len : 1)};
 }
 
+// Arpeggiated steps (the A effect) still playing: the step's notes one after another until it ends.
+struct ArpRun {
+  bool used;
+  uint8_t track;
+  uint8_t seq[arp::MAX_SEQ];
+  uint8_t len;
+  bool random;
+  uint8_t vel;
+  uint8_t stepTicks;
+  uint32_t next, end, k;
+};
+static constexpr uint8_t MAX_ARPS = 8;
+static ArpRun arps[MAX_ARPS];
+
 // Ratchet repeats waiting for their tick.
 struct Pending {
   bool used;
@@ -162,6 +177,25 @@ static void sendStepFx(uint8_t t, const Track& tr, uint8_t cmd, uint8_t val) {
   (void)t;
 }
 
+static void playArps(uint32_t tick) {
+  for (auto& r : arps) {   // the next note of each arp step, when it is due
+    if (!r.used) continue;
+    while (r.used && (int32_t)(tick - r.next) >= 0) {
+      if ((int32_t)(r.next - r.end) >= 0) { r.used = false; break; }
+      const Track& tr = song.tracks[r.track];
+      if (!tr.mute && !silent[r.track] && r.len) {
+        const uint8_t pitch = r.seq[r.random ? arp::randomIndex(r.k, r.len) : r.k % r.len];
+        const uint32_t room = r.end - r.next;
+        uint16_t len = (uint16_t)(r.stepTicks * 3 / 4);
+        if (len > room) len = (uint16_t)room;
+        startNote(r.track, tr, NoteEvent{0, 0, pitch, r.vel, (uint16_t)(len ? len : 1), 0}, tick, true);
+      }
+      r.k++;
+      r.next += r.stepTicks;
+    }
+  }
+}
+
 static void enterScene(uint32_t tick) {
   if (song.arrange.empty()) song.arrange.assign(1, 0);
   if (songPos >= song.arrange.size()) songPos = 0;
@@ -182,6 +216,9 @@ static void enterScene(uint32_t tick) {
 static void processTick(uint32_t tick) {
   for (auto& a : active)
     if (a.used && !a.held && (int32_t)(tick - a.offTick) >= 0) noteOffActive(a);
+
+  playArps(tick);
+  player::arpClock();   // the live arpeggiator follows the song's clock while it plays
 
   for (auto& q : pending)
     if (q.used && (int32_t)(tick - q.tick) >= 0) {
@@ -248,6 +285,28 @@ static void processTick(uint32_t tick) {
     }
 
     if (offHere || (nf && tr.hold)) releaseTrackLocked(t);
+    uint8_t am = 0, ar = 0, ao = 1;
+    if (nf && cmd == FX_ARP && arp::decode(val, &am, &ar, &ao)) {
+      // An arp step: its notes become a run the loop above plays out across the step's length.
+      ArpRun* run = nullptr;
+      for (auto& r : arps) if (r.used && r.track == t) run = &r;   // a new arp on a track replaces the old one
+      if (!run) for (auto& r : arps) if (!r.used) { run = &r; break; }
+      if (run) {
+        uint8_t notes[8];
+        for (uint8_t i = 0; i < nf; i++) notes[i] = fire[i]->pitch;
+        run->used = true;
+        run->track = t;
+        run->random = am == arp::RANDOM;
+        run->len = arp::sequence(notes, nf, run->random ? (uint8_t)arp::UP : am, ao, run->seq);
+        run->vel = fire[0]->vel;
+        run->stepTicks = arp::rateTicks(ar);
+        run->k = 0;
+        run->next = tick;
+        run->end = tick + (fire[0]->len ? fire[0]->len : 1);
+        playArps(tick);   // its first note is due now
+      }
+      nf = 0;   // the run plays them
+    }
     if (!tr.mute) {
       for (uint8_t i = 0; i < nf; i++) {
         NoteEvent e = *fire[i];
@@ -310,6 +369,9 @@ uint8_t tapTempo() {
   return n;
 }
 
+static bool freeRunning = false;   // the live arp's clock while the song is stopped
+static uint32_t freeTickUs = 0;
+
 static void clockTask(void*) {
   for (;;) {
     if (isPlaying) {
@@ -324,6 +386,20 @@ static void clockTask(void*) {
       }
       midi::update();  // send this tick's BLE packet right away
       unlock();
+      freeRunning = false;
+    } else if (player::arpActive()) {
+      // Stopped, but the live arpeggiator is playing: its own clock at the song's tempo.
+      lock();
+      uint32_t now = micros();
+      if (!freeRunning || (int32_t)(now - freeTickUs) > 100000) { freeTickUs = now; freeRunning = true; }
+      while ((int32_t)(now - freeTickUs) >= 0) {
+        player::arpClock();
+        freeTickUs += tickUs();
+      }
+      midi::update();
+      unlock();
+    } else {
+      freeRunning = false;
     }
     vTaskDelay(1);
   }
@@ -388,6 +464,7 @@ void stop() {
     if (a.used) noteOffActive(a);
   for (auto& r : recHeld) r.used = false;
   for (auto& q : pending) q.used = false;
+  for (auto& r : arps) r.used = false;
   if (settings.clockOut) midi::realtime(midi::RT_STOP);
   midi::update();
 }

@@ -33,6 +33,13 @@ typedef int (*NoteFilter)(int note);
 void setNoteFilter(NoteFilter f);
 
 uint8_t inversion();
+// The live arpeggiator: while it is on, piano / chord keys feed it instead of sounding (and enter nothing).
+void setArp(bool on);
+bool arpEnabled();
+// One engine tick (48 per beat). The engine calls it while playing; with the transport stopped it keeps
+// its own clock running while arpActive().
+void arpClock();
+bool arpActive();
 // Chord bank (top rows in TOP_BANK): the root picked, and the slash-bass mode
 // (0 none, 1 /3rd, 2 /5th, 3 /7th). `bankReset` starts from the song's key.
 uint8_t bankRoot();

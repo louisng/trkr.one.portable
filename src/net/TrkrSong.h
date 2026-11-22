@@ -56,6 +56,10 @@ struct Pattern {
   // Tracks that play the same part as an earlier pattern's (a scene sharing a part): {track, that pattern}.
   // An `lk` line; the notes are listed in full anyway, so it only says they are one part.
   std::vector<std::pair<uint8_t, uint16_t>> links;
+  // Arpeggiated cells (an `ax` line): {track, step, the arp byte (play/Arp.h)}. Kept apart from the
+  // events so a song without arps costs nothing.
+  struct StepArp { uint8_t track, step, code; };
+  std::vector<StepArp> arps;
 };
 
 struct Song {

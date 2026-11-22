@@ -35,6 +35,9 @@ struct Settings {
   uint8_t genAlong = 1;    // play-along filter: 0 free, 1 chord tones, 2 snap to chord, 3 scale
   // New fields go at the end: older saved settings still load (the new
   // fields keep their defaults).
+  // The live arpeggiator (fn+a, the Arp screen): play/Arp.h. Appended: older settings files load fine.
+  uint8_t arpMode = 0, arpRate = 3, arpOctaves = 1, arpGate = 50, arpSwing = 50;
+  bool arpHold = false;
 };
 
 extern Settings settings;

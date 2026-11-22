@@ -3,6 +3,7 @@
 #include <stdio.h>
 
 #include "../input/KeyInput.h"
+#include "../play/Arp.h"
 #include "../input/KeyLayout.h"
 #include "../play/LivePlayer.h"
 #include "../seq/Engine.h"
@@ -41,7 +42,7 @@ void formatNoteLengthShort(uint16_t len, char* out, size_t n) {
 
 // ── Effects ──────────────────────────────────────────────────────────────────
 char fxLetter(uint8_t cmd) {
-  static const char L[FX_COUNT] = {'-', 'P', 'R', 'T', 'H', 'M', 'B', 'G', 'S'};
+  static const char L[FX_COUNT] = {'-', 'P', 'R', 'T', 'H', 'M', 'B', 'G', 'S', 'A'};
   return cmd < FX_COUNT ? L[cmd] : '?';
 }
 
@@ -54,6 +55,7 @@ uint8_t fxDefault(uint8_t cmd) {
     case FX_MOD: return 64;
     case FX_BEND: return 0x40;
     case FX_STRUM: return 2;  // down, medium
+    case FX_ARP: return arp::encode(arp::UP, 3, 1);  // up, 1/16, 1 octave
     default: return 0;
   }
 }
@@ -77,6 +79,18 @@ static uint8_t condAt(int idx) {
 }
 
 uint8_t fxStepValue(uint8_t cmd, uint8_t val, int dir, bool big) {
+  if (cmd == FX_ARP) {
+    // , / step the mode; with shift, the rate (and past the last rate, the octaves)
+    uint8_t m = 0, r = 3, o = 1;
+    arp::decode(val, &m, &r, &o);
+    int idx = m + arp::STEP_MODES * (r + arp::RATE_COUNT * (o - 1));
+    const int count = arp::STEP_MODES * arp::RATE_COUNT * 4;
+    idx = ((idx + dir * (big ? arp::STEP_MODES : 1)) % count + count) % count;
+    m = (uint8_t)(idx % arp::STEP_MODES);
+    r = (uint8_t)((idx / arp::STEP_MODES) % arp::RATE_COUNT);
+    o = (uint8_t)(idx / (arp::STEP_MODES * arp::RATE_COUNT) + 1);
+    return arp::encode(m, r, o);
+  }
   if (cmd == FX_COND) return condAt(condIndex(val) + dir * (big ? 5 : 1));
   int lo = 0, hi = 127;
   if (cmd == FX_CHANCE) hi = 100;
@@ -95,6 +109,12 @@ void fxDescribe(uint8_t cmd, uint8_t val, char* out, size_t n) {
     case FX_MOD: snprintf(out, n, "M: mod wheel = %d", val); break;
     case FX_BEND: snprintf(out, n, "B: pitch bend %+d", (int)val - 64); break;
     case FX_PROGRAM: snprintf(out, n, "G: program change %d", val); break;
+    case FX_ARP: {
+      uint8_t m, r, o;
+      if (arp::decode(val, &m, &r, &o)) snprintf(out, n, "A: arp %s %s %d oct", arp::modeName(m), arp::rateName(r), o);
+      else snprintf(out, n, "A: arp");
+      break;
+    }
     case FX_STRUM: {
       static const char* const SPEED[3] = {"fast", "medium", "slow"};
       if (strumValid(val)) snprintf(out, n, "S: strum %s %s", strumUp(val) ? "up" : "down", SPEED[(val - 1) % 3]);

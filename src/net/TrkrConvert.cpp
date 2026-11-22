@@ -165,6 +165,8 @@ bool Importer::addPattern(const Pattern& wp, const char** error) {
       }
       if (seq::strumValid(e.strum) && e.count > 1) seq::setFx(cand, e.step, seq::FX_STRUM, e.strum);
     }
+    for (const auto& a : wp.arps)   // an arp wins over a strum (a step has one effect)
+      if (a.track == t && a.step < len) seq::setFx(cand, a.step, seq::FX_ARP, a.code);
     if (cand.notes.empty()) continue;  // silent in this pattern
     std::sort(cand.notes.begin(), cand.notes.end(), lessNote);
     // two notes on the same step and pitch collapse into one
@@ -382,6 +384,7 @@ bool toWeb(const seq::Song& in, const Meta* meta, const char* name, Song& out, c
           e.step = (uint8_t)(base + step);
           uint8_t fc = seq::FX_NONE, fv = 0;
           if (e.count > 1 && seq::fxAt(p, step, &fc, &fv) && fc == seq::FX_STRUM && seq::strumValid(fv)) e.strum = fv;
+          if (seq::fxAt(p, step, &fc, &fv) && fc == seq::FX_ARP) wp.arps.push_back({t, (uint8_t)(base + step), fv});
           wp.events.push_back(e);
           if (++events > MAX_EVENTS) return fail("song is too big for the device to convert");
         }
