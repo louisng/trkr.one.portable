@@ -13,6 +13,8 @@
 // Keys: ; . rows (hold opt: 10 at a time)   , / columns (scrolls across tracks)
 //   piano / chord / drum keys: write notes at the cursor, move down a row
 //   f / l: value down / up (note column: transpose a semitone); shift = bigger
+//   ctrl + , /: the note under the cursor a semitone down / up; ctrl + ; .: an octave up / down
+//   fn+e: put the arp (its held notes, mode, rate, octaves) on this row
 //   del: clear the value (on an empty row: OFF)   ': track options
 #include <stdio.h>
 
@@ -38,6 +40,7 @@ static constexpr int NOTE_W = 20, VEL_W = 14, LEN_W = 20, OFS_W = 14, FXC_W = 8,
 static constexpr int EXTRA_FIELDS = 5;  // VL LEN OF FX FV
 static constexpr uint8_t IDX_SHIFT = 2 * 14 + 1;
 static constexpr uint8_t IDX_OPT = 3 * 14 + 1;
+static constexpr uint8_t IDX_CTRL = 3 * 14 + 0;
 static constexpr int JUMP_ROWS = 10;
 
 enum FieldKind : uint8_t { F_NOTE, F_VEL, F_LEN, F_OFS, F_FXC, F_FXV };
@@ -86,6 +89,26 @@ class TrackerScreen : public Screen {
     Pattern& p = tr.cur();
     const uint8_t nc = noteCols(p);
     const bool shift = keys::isDown(IDX_SHIFT);
+    // ctrl + arrows: move the note under the cursor (or the whole step, off the note columns):
+    // left / right a semitone, up / down an octave
+    if (keys::isDown(IDX_CTRL) && row < p.length &&
+        (a == layout::ACT_LEFT || a == layout::ACT_RIGHT || a == layout::ACT_UP || a == layout::ACT_DOWN)) {
+      const int semis = a == layout::ACT_RIGHT ? 1 : a == layout::ACT_LEFT ? -1 : a == layout::ACT_UP ? 12 : -12;
+      const uint8_t step = (uint8_t)row;
+      NoteEvent ev[MAX_NOTES_PER_STEP];
+      bool off;
+      const uint8_t n = stepNotes(p, step, ev, &off);
+      if (!n || off) { toast("No note here"); return; }
+      bool ok;
+      if (kindOf(field, nc) == F_NOTE && field < n) {
+        const int np = ev[field].pitch + semis;
+        ok = np >= 0 && np <= 127 && repitchNote(p, step, ev[field].pitch, (uint8_t)np);
+      } else {
+        ok = transposePattern(p, semis, step);
+      }
+      if (!ok) toast(tr.kind == TrackKind::Drum ? "Drums: f / l pick the drum" : "Out of range");
+      return;
+    }
     switch (a) {
       case layout::ACT_UP: moveRow(keys::isDown(IDX_OPT) ? -JUMP_ROWS : -1, p); break;
       case layout::ACT_DOWN: moveRow(keys::isDown(IDX_OPT) ? JUMP_ROWS : 1, p); break;
@@ -101,6 +124,13 @@ class TrackerScreen : public Screen {
         break;
       default: break;
     }
+  }
+
+  bool placeArp(const uint8_t* notes, uint8_t n, uint8_t code) override {
+    if (options::isOpen()) return true;
+    Track& tr = song.tracks[track];
+    ui::placeArp(tr, tr.cur(), (uint8_t)row, notes, n, code);
+    return true;
   }
 
   void onPlayed(uint8_t, const player::Played& pl) override {

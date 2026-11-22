@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "../seq/Song.h"
+
 namespace ui {
 namespace options {
 
@@ -31,5 +33,9 @@ char fxLetter(uint8_t cmd);
 uint8_t fxDefault(uint8_t cmd);
 uint8_t fxStepValue(uint8_t cmd, uint8_t val, int dir, bool big);
 void fxDescribe(uint8_t cmd, uint8_t val, char* out, size_t n);
+
+// Put an arpeggio on a step (fn+e): the arp's notes (if any; else the step's own) and its settings
+// (`code`, play/Arp.h) as the A effect. The step lasts one round of the arpeggio. Shows a message.
+void placeArp(seq::Track& tr, seq::Pattern& p, uint8_t step, const uint8_t* notes, uint8_t n, uint8_t code);
 
 }  // namespace ui

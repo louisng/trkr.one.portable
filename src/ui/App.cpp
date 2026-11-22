@@ -10,6 +10,7 @@
 #include "../net/Cloud.h"
 #include "../play/GenMode.h"
 #include "../music/Theory.h"
+#include "../play/Arp.h"
 #include "../play/LivePlayer.h"
 #include "../seq/Engine.h"
 #include "Screen.h"
@@ -55,7 +56,7 @@ static bool adv = false;
 
 // Shortcut keys, looked up by key cap so they follow the layout table.
 static int8_t idxDigit[10];
-static int8_t idxB = -1, idxU = -1, idxM = -1, idxP = -1, idxS = -1, idxT = -1, idxX = -1, idxC = -1, idxW = -1, idxG = -1, idxJ = -1, idxA = -1;
+static int8_t idxB = -1, idxU = -1, idxM = -1, idxP = -1, idxS = -1, idxT = -1, idxX = -1, idxC = -1, idxW = -1, idxG = -1, idxJ = -1, idxA = -1, idxE = -1;
 // Play only (fn+j): the musical keys play but nothing goes into the song (no step entry, no recording).
 static bool playOnly = false;
 
@@ -159,6 +160,16 @@ static void toggleSpeaker() {
   }
   settings.speaker = want;
   toast(want ? "Sound on" : "Sound off (RAM freed)");
+}
+
+// fn+e: put the arp on the step at the cursor (Step / Tracker): its held notes and settings.
+static void placeArpHere() {
+  if (settings.arpMode >= arp::STEP_MODES) { toast("Chord mode stays live: pick another mode"); return; }
+  uint8_t pool[16];
+  seq::Lock l;
+  const uint8_t n = player::arpPool(pool);
+  const uint8_t code = arp::encode(settings.arpMode, settings.arpRate, settings.arpOctaves);
+  if (!current->placeArp(pool, n, code)) toast("Open Step or Tracker to put the arp on a step");
 }
 
 static void toggleArp() {
@@ -274,6 +285,7 @@ static void handleFnKey(uint8_t idx) {
   else if (idx == idxP) toggleUpperPiano();
   else if (idx == idxJ) togglePlayOnly();
   else if (idx == idxA) toggleArp();
+  else if (idx == idxE) placeArpHere();
   else if (idx == idxB) toggleBle();
   else if (idx == idxU) toggleUsb();
   else if (idx == idxS) saveSong();
@@ -335,6 +347,14 @@ static void handleEvent(const keys::Event& e) {
   }
 
   if (current->consumeKey(e.index, e.pressed)) return;
+
+  // del with the arp on lets go of the held notes (it doesn't clear the step under the cursor)
+  if (e.pressed && isAction && def.value == layout::ACT_DELETE && player::arpEnabled()) {
+    seq::Lock l;
+    player::arpClear();
+    toast("Arp: held notes cleared");
+    return;
+  }
 
   if (e.pressed && isAction && def.value == layout::ACT_PLAY && current->spaceIsPlay()) {
     handleTransport(def.value);
@@ -562,6 +582,7 @@ void begin() {
   idxG = findCap("g");
   idxJ = findCap("j");
   idxA = findCap("a");
+  idxE = findCap("e");
   applyBtAuto();  // reconnect the remembered Bluetooth device
   layout::setTopMode(settings.topMode);
   lastBle = midi::bleState();

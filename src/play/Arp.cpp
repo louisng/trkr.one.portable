@@ -72,11 +72,26 @@ uint8_t sequence(const uint8_t* notes, uint8_t n, uint8_t mode, uint8_t octaves,
 }
 
 void Live::press(uint8_t note) {
-  for (uint8_t i = 0; i < nDown; i++) if (down[i] == note) return;
-  if (hold && !nDown) nLatched = 0;   // a fresh chord replaces the held one
-  if (nDown < 16) down[nDown++] = note;
-  if (hold) { memcpy(latched, down, nDown); nLatched = nDown; }
-  if (nDown == 1) { pos = 0; count = 0; }
+  bool isDown = false;
+  for (uint8_t i = 0; i < nDown; i++) isDown |= down[i] == note;
+  if (!isDown && nDown < 16) down[nDown++] = note;
+  if (hold) {
+    // every key joins the held notes, in the order pressed (del lets go of them all)
+    bool have = false;
+    for (uint8_t i = 0; i < nLatched; i++) have |= latched[i] == note;
+    if (!have && nLatched < 16) latched[nLatched++] = note;
+    if (nLatched == 1) { pos = 0; count = 0; }
+  } else if (nDown == 1) {
+    pos = 0;
+    count = 0;
+  }
+}
+
+uint8_t Live::pool(uint8_t* out) const {
+  const uint8_t* src = hold ? latched : down;
+  const uint8_t n = hold ? nLatched : nDown;
+  memcpy(out, src, n);
+  return n;
 }
 
 void Live::release(uint8_t note) {
@@ -89,8 +104,8 @@ void Live::release(uint8_t note) {
 }
 
 uint8_t Live::step(uint8_t* out) {
-  const uint8_t* src = nDown ? down : latched;
-  const uint8_t n = nDown ? nDown : (hold ? nLatched : 0);
+  const uint8_t* src = hold ? latched : down;
+  const uint8_t n = hold ? nLatched : nDown;
   if (!n) return 0;
   count++;
   if (mode == CHORD) {   // the whole chord, an octave higher each time round

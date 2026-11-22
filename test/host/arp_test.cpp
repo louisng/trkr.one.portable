@@ -52,11 +52,22 @@ int main() {
   a.release(60); a.release(64);
   CHECK(!a.running() && a.step(out) == 0, "stops when you let go");
   a.setHold(true);
-  a.press(60); a.press(64); a.release(60); a.release(64);
+  a.mode = ORDER;
+  a.press(64); a.press(60); a.release(64); a.release(60);
   CHECK(a.running(), "HOLD keeps going");
-  a.press(62); a.press(65); a.release(62); a.release(65);
-  a.step(out);
-  CHECK(out[0] == 62, "a fresh chord replaces the held one");
+  a.press(67); a.release(67);                    // a later key joins the held notes
+  a.press(62); a.release(62);
+  uint8_t pool[16];
+  CHECK(a.pool(pool) == 4 && pool[0] == 64 && pool[1] == 60 && pool[2] == 67 && pool[3] == 62, "the pool keeps the order they were pressed");
+  std::string ord;
+  for (int i = 0; i < 5; i++) { a.step(out); ord += std::to_string(out[0]) + " "; }
+  CHECK(ord == "64 60 67 62 64 ", "ORDER plays them in that order");
+  a.press(60); a.release(60);
+  CHECK(a.pool(pool) == 4, "a note already held is not added twice");
+  a.clear();
+  CHECK(!a.running() && a.pool(pool) == 0, "del lets go of all of them");
+  a.press(72); a.release(72);
+  CHECK(a.running() && a.pool(pool) == 1 && pool[0] == 72, "and it starts again from the next key");
   a.setHold(false);
   CHECK(!a.running(), "HOLD off lets go");
   Live c;

@@ -2,9 +2,10 @@
 
 #include <stdio.h>
 
+#include "../app/Settings.h"
 #include "../input/KeyInput.h"
-#include "../play/Arp.h"
 #include "../input/KeyLayout.h"
+#include "../play/Arp.h"
 #include "../play/LivePlayer.h"
 #include "../seq/Engine.h"
 #include "Screen.h"
@@ -123,6 +124,39 @@ void fxDescribe(uint8_t cmd, uint8_t val, char* out, size_t n) {
     }
     default: snprintf(out, n, "No effect"); break;
   }
+}
+
+void placeArp(Track& tr, Pattern& p, uint8_t step, const uint8_t* notes, uint8_t n, uint8_t code) {
+  if (tr.kind == TrackKind::Drum) { toast("Arps go on a synth track"); return; }
+  if (step >= p.length) { toast("Past the end of this pattern"); return; }
+  uint8_t mode = 0, rate = 3, oct = 1;
+  if (!arp::decode(code, &mode, &rate, &oct)) return;
+  uint8_t use[MAX_NOTES_PER_STEP];
+  uint8_t cnt = 0;
+  if (n) {
+    for (uint8_t i = 0; i < n && cnt < MAX_NOTES_PER_STEP; i++) use[cnt++] = notes[i];
+  } else {   // no notes held in the arp: arpeggiate what the step already has
+    NoteEvent ev[MAX_NOTES_PER_STEP];
+    const uint8_t have = notesAt(p, step, ev);
+    for (uint8_t i = 0; i < have && i < MAX_NOTES_PER_STEP; i++)
+      if (ev[i].pitch != PITCH_OFF) use[cnt++] = ev[i].pitch;
+  }
+  if (!cnt) { toast("Hold notes in the arp, or put a chord on this step"); return; }
+  // one round of the arpeggio, as long as the pattern allows
+  uint8_t seqOut[arp::MAX_SEQ];
+  const uint8_t len = arp::sequence(use, cnt, mode == arp::RANDOM ? (uint8_t)arp::UP : mode, oct, seqOut);
+  uint32_t ticks = (uint32_t)len * arp::rateTicks(rate);
+  const uint32_t room = (uint32_t)(p.length - step) * TICKS_PER_STEP;
+  if (ticks < TICKS_PER_STEP) ticks = TICKS_PER_STEP;
+  if (ticks > room) ticks = room;
+  if (n) setStep(p, step, use, cnt, settings.velocity, (uint16_t)ticks);
+  else setStepLength(p, step, (uint16_t)ticks);
+  setFx(p, step, FX_ARP, code);
+  char msg[44];
+  snprintf(msg, sizeof(msg), "Arp %s %s on step %d (%d steps)", arp::modeName(mode), arp::rateName(rate), step + 1,
+           (int)((ticks + TICKS_PER_STEP - 1) / TICKS_PER_STEP));
+  if (n > MAX_NOTES_PER_STEP) snprintf(msg, sizeof(msg), "Arp on step %d: its first 4 notes (a step holds 4)", step + 1);
+  toast(msg);
 }
 
 namespace options {

@@ -127,6 +127,8 @@ void setArp(bool on) {
   arpSilence();
 }
 bool arpEnabled() { return arpOn; }
+uint8_t arpPool(uint8_t* out) { return liveArp.pool(out); }
+void arpClear() { liveArp.clear(); }
 bool arpActive() {
   if (!arpOn) return false;
   if (liveArp.running()) return true;

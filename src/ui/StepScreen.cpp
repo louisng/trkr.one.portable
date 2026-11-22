@@ -36,6 +36,12 @@ class StepScreen : public Screen {
     entryHeld = 0;
   }
 
+  bool placeArp(const uint8_t* notes, uint8_t n, uint8_t code) override {
+    Track& tr = song.tracks[selectedTrack()];
+    ui::placeArp(tr, tr.cur(), (uint8_t)cursor, notes, n, code);
+    return true;
+  }
+
   void onAction(uint8_t a) override {
     Track& tr = song.tracks[selectedTrack()];
     Pattern& p = tr.cur();

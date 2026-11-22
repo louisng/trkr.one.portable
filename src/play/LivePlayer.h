@@ -40,6 +40,9 @@ bool arpEnabled();
 // its own clock running while arpActive().
 void arpClock();
 bool arpActive();
+// The notes the arp is playing (in the order pressed) and, with HOLD, letting go of them all (del).
+uint8_t arpPool(uint8_t* out);
+void arpClear();
 // Chord bank (top rows in TOP_BANK): the root picked, and the slash-bass mode
 // (0 none, 1 /3rd, 2 /5th, 3 /7th). `bankReset` starts from the song's key.
 uint8_t bankRoot();
