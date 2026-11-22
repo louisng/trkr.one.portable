@@ -13,7 +13,8 @@
 // Keys: ; . rows (hold opt: 10 at a time)   , / columns (scrolls across tracks)
 //   piano / chord / drum keys: write notes at the cursor, move down a row
 //   f / l: value down / up (note column: transpose a semitone); shift = bigger
-//   ctrl + , /: the note under the cursor a semitone down / up; ctrl + ; .: an octave up / down
+//   ctrl + arrows: change what is under the cursor (a note, a number, an arp or strum), or on a blank
+//   row put in the last note or chord played (see ctrlArrow)
 //   fn+e: put the arp (its held notes, mode, rate, octaves) on this row
 //   del: clear the value (on an empty row: OFF)   ': track options
 #include <stdio.h>
@@ -89,32 +90,10 @@ class TrackerScreen : public Screen {
     Pattern& p = tr.cur();
     const uint8_t nc = noteCols(p);
     const bool shift = keys::isDown(IDX_SHIFT);
-    // ctrl + arrows: move the note under the cursor (or the whole step, off the note columns):
-    // left / right a semitone, up / down an octave
+    // ctrl + arrows: change what is under the cursor (see ctrlArrow)
     if (keys::isDown(IDX_CTRL) && row < p.length &&
         (a == layout::ACT_LEFT || a == layout::ACT_RIGHT || a == layout::ACT_UP || a == layout::ACT_DOWN)) {
-      const int semis = a == layout::ACT_RIGHT ? 1 : a == layout::ACT_LEFT ? -1 : a == layout::ACT_UP ? 12 : -12;
-      const uint8_t step = (uint8_t)row;
-      NoteEvent ev[MAX_NOTES_PER_STEP];
-      bool off;
-      const uint8_t n = stepNotes(p, step, ev, &off);
-      if (!n || off) { toast("No note here"); return; }
-      bool ok;
-      uint8_t hear[MAX_NOTES_PER_STEP];
-      uint8_t nh = 0;
-      if (kindOf(field, nc) == F_NOTE && field < n) {
-        const int np = ev[field].pitch + semis;
-        ok = np >= 0 && np <= 127 && repitchNote(p, step, ev[field].pitch, (uint8_t)np);
-        if (ok) hear[nh++] = (uint8_t)np;
-      } else {
-        ok = transposePattern(p, semis, step);
-        if (ok) {   // the whole step: hear all of it
-          const uint8_t m = stepNotes(p, step, ev, &off);
-          for (uint8_t i = 0; i < m; i++) hear[nh++] = ev[i].pitch;
-        }
-      }
-      if (!ok) toast(tr.kind == TrackKind::Drum ? "Drums: f / l pick the drum" : "Out of range");
-      else player::previewStep(track, hear, nh, ev[0].len, ev[0].vel);   // hear it as it will play
+      ctrlArrow(tr, p, nc, a);
       return;
     }
     switch (a) {
@@ -150,6 +129,8 @@ class TrackerScreen : public Screen {
       if (entryHeld) entryHeld--;
       return;
     }
+    if (entryHeld == 0) lastCount = 0;   // a new note or chord: remember it for ctrl + arrows on a blank row
+    for (uint8_t i = 0; i < pl.count && lastCount < MAX_NOTES_PER_STEP; i++) lastNotes[lastCount++] = pl.notes[i];
     if (row >= p.length) {
       toast("Past the end of this pattern");
       return;
@@ -225,6 +206,8 @@ class TrackerScreen : public Screen {
 
  private:
   uint8_t track = 1;
+  uint8_t lastNotes[MAX_NOTES_PER_STEP] = {60};   // the last note or chord played in (ctrl + arrows on a blank row)
+  uint8_t lastCount = 0;
   int row = 0;
   int field = 0;  // within the track: note columns, then VL, LEN, OF
   int top = 0;
@@ -265,6 +248,94 @@ class TrackerScreen : public Screen {
     entryRow = -1;
     entryHeld = 0;
     cursorMovedAt = millis();
+  }
+
+  // ctrl + arrows, by what the cursor is on:
+  //   note           , /  a semitone          ; .  an octave        (drums: , / the previous / next drum)
+  //   blank row      any arrow puts in the last note or chord you played (middle C, or a kick, at first)
+  //   velocity       , /  1                   ; .  10
+  //   length         , /  the next length     ; .  a bar
+  //   offset         , /  1 tick              ; .  3 ticks
+  //   effect value   , /  1 (strum: the next one; arp: the mode)   ; .  10 (strum: up / down; arp: the rate)
+  //   effect letter  nothing (f / l choose the effect)
+  void ctrlArrow(Track& tr, Pattern& p, uint8_t nc, uint8_t a) {
+    const bool lr = a == layout::ACT_LEFT || a == layout::ACT_RIGHT;
+    const int dir = (a == layout::ACT_RIGHT || a == layout::ACT_UP) ? 1 : -1;
+    const uint8_t step = (uint8_t)row;
+    const bool drum = tr.kind == TrackKind::Drum;
+    NoteEvent ev[MAX_NOTES_PER_STEP];
+    bool off;
+    const uint8_t n = stepNotes(p, step, ev, &off);
+    switch (kindOf(field, nc)) {
+      case F_NOTE: {
+        if (!n || off) {   // a blank row: the last note or chord played in
+          uint8_t notes[MAX_NOTES_PER_STEP];
+          uint8_t cnt = lastCount;
+          for (uint8_t i = 0; i < cnt; i++) notes[i] = lastNotes[i];
+          if (!cnt) notes[cnt++] = drum ? 36 : 60;
+          if (off) clearStep(p, step);
+          setStep(p, step, notes, cnt, settings.velocity, entryLen);
+          player::previewStep(track, notes, cnt, entryLen, settings.velocity);
+          return;
+        }
+        if ((int)field >= n) return;   // the empty column of a chord
+        if (drum) {   // drums: the previous / next drum
+          if (!lr) return;
+          int lane = drumLaneOf(ev[field].pitch);
+          for (int tries = 0; tries < DRUM_LANES; tries++) {
+            lane = ((lane < 0 ? 0 : lane) + dir + DRUM_LANES) % DRUM_LANES;
+            if (repitchNote(p, step, ev[field].pitch, DRUM_LANE_ID[lane])) break;
+          }
+          return;
+        }
+        const int np = ev[field].pitch + (lr ? dir : dir * 12);
+        if (np < 0 || np > 127 || !repitchNote(p, step, ev[field].pitch, (uint8_t)np)) { toast("Out of range"); return; }
+        const uint8_t h = (uint8_t)np;
+        player::previewStep(track, &h, 1, ev[field].len, ev[field].vel);   // hear it as it will play
+        return;
+      }
+      case F_VEL:
+        if (n && !off) setStepVelocity(p, step, (uint8_t)constrain(ev[0].vel + dir * (lr ? 1 : 10), 1, 127));
+        return;
+      case F_LEN: {
+        if (!n || off) return;
+        const uint16_t maxLen = (uint16_t)p.length * TICKS_PER_STEP;
+        const uint16_t len = lr ? nextNoteLength(ev[0].len, dir > 0, maxLen)
+                                : (uint16_t)constrain((int)ev[0].len + dir * 16 * TICKS_PER_STEP, TICKS_PER_STEP / 4, maxLen);
+        setStepLength(p, step, len);
+        entryLen = len;
+        return;
+      }
+      case F_OFS:
+        if (n && !off) setStepOffset(p, step, (int8_t)(ev[0].offset + dir * (lr ? 1 : 3)));
+        return;
+      case F_FXC:
+        return;   // f / l choose the effect
+      case F_FXV: {
+        uint8_t cmd = FX_NONE, val = 0;
+        if (!fxAt(p, step, &cmd, &val)) return;
+        switch (cmd) {
+          case FX_STRUM:
+            if (lr) val = fxStepValue(cmd, val, dir, false);   // 1..6
+            else val = (uint8_t)(val > 3 ? val - 3 : val + 3);  // down <-> up, same speed
+            break;
+          case FX_ARP: val = fxStepValue(cmd, val, dir, !lr); break;   // , / mode   ; . rate
+          case FX_COND: val = fxStepValue(cmd, val, dir, !lr); break;
+          case FX_RATCHET: val = fxStepValue(cmd, val, dir, false); break;
+          default: {
+            const int hi = cmd == FX_CHANCE ? 100 : 127;
+            const int v = (int)val + dir * (lr ? 1 : 10);
+            val = (uint8_t)(v < 0 ? 0 : v > hi ? hi : v);
+            break;
+          }
+        }
+        setFx(p, step, cmd, val);
+        char msg[40];
+        fxDescribe(cmd, val, msg, sizeof(msg));
+        toast(msg);
+        return;
+      }
+    }
   }
 
   void adjust(Track& tr, Pattern& p, uint8_t nc, int dir, bool big) {
