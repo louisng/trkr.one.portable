@@ -114,7 +114,7 @@ class TrackerScreen : public Screen {
         }
       }
       if (!ok) toast(tr.kind == TrackKind::Drum ? "Drums: f / l pick the drum" : "Out of range");
-      else player::preview(track, hear, nh);   // hear what it is now
+      else player::previewStep(track, hear, nh, ev[0].len, ev[0].vel);   // hear it as it will play
       return;
     }
     switch (a) {
@@ -278,7 +278,7 @@ class TrackerScreen : public Screen {
         int np = ev[field].pitch + dir * (big ? 12 : 1);
         if (np >= 0 && np <= 127 && repitchNote(p, step, ev[field].pitch, (uint8_t)np)) {
           const uint8_t h = (uint8_t)np;
-          player::preview(track, &h, 1);   // hear the new note
+          player::previewStep(track, &h, 1, ev[field].len, ev[field].vel);   // hear it as it will play
         }
         break;
       }

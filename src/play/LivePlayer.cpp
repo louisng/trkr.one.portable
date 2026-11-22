@@ -73,12 +73,13 @@ void bankReset() { bankRootPc = settings.root % 12; bankBassMode = 0; }
 const char* lastPlayed() { return last; }
 bool keySounding(uint8_t k) { return k < layout::KEY_COUNT && held[k].channel != 0; }
 
-static void startNote(uint8_t track, uint8_t ch, uint8_t note, bool drum, uint8_t pad) {
+static void startNote(uint8_t track, uint8_t ch, uint8_t note, bool drum, uint8_t pad, uint8_t vel = 0) {
+  if (!vel) vel = settings.velocity;
   uint8_t& r = refs[(ch - 1) & 15][note & 127];
   if (r == 0) {
-    midi::noteOn(ch, note, settings.velocity);
-    if (drum) synth::drum(track, pad, settings.velocity);
-    else synth::noteOn(track, note, settings.velocity);
+    midi::noteOn(ch, note, vel);
+    if (drum) synth::drum(track, pad, vel);
+    else synth::noteOn(track, note, vel);
   }
   if (r < 255) r++;
 }
@@ -139,17 +140,29 @@ static void previewStop() {
   for (uint8_t i = 0; i < pvCount; i++) stopNote(pvTrack, pvCh, pvNotes[i], false);
   pvCount = 0;
 }
-void preview(uint8_t track, const uint8_t* notes, uint8_t n, uint16_t ms) {
+void preview(uint8_t track, const uint8_t* notes, uint8_t n, uint16_t ms, uint8_t vel) {
   previewStop();
   if (track >= seq::TRACKS || seq::song.tracks[track].kind == seq::TrackKind::Drum) return;
   pvTrack = track;
   pvCh = seq::song.tracks[track].channel;
   for (uint8_t i = 0; i < n && pvCount < MAX_NOTES_PER_STEP_PV; i++) {
     pvNotes[pvCount++] = notes[i];
-    startNote(track, pvCh, notes[i], false, 0);
+    startNote(track, pvCh, notes[i], false, 0, vel);
   }
   pvEnd = millis() + ms;
 }
+void previewStep(uint8_t track, const uint8_t* notes, uint8_t n, uint16_t lenTicks, uint8_t vel) {
+  // as long as it plays in the song: its length at the song's tempo. A track in hold mode rings until
+  // the next note, so there a short taste is enough. (At most 4 seconds.)
+  uint32_t ms = 350;
+  if (track < seq::TRACKS && !seq::song.tracks[track].hold && lenTicks) {
+    ms = (uint32_t)lenTicks * 60000UL / ((uint32_t)seq::song.bpm * seq::TICKS_PER_STEP * 4);
+    if (ms < 40) ms = 40;
+    if (ms > 4000) ms = 4000;
+  }
+  preview(track, notes, n, (uint16_t)ms, vel);
+}
+
 void previewTick() {
   if (pvCount && (int32_t)(millis() - pvEnd) >= 0) previewStop();
 }

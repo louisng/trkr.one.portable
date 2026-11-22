@@ -99,7 +99,7 @@ classic tracker layout: `q w e r t y u i o p [ ] \` are white keys (C up to A) a
   - Piano / chord / drum keys write at the cursor and move down a row (hold one key and
     press more to stack a chord). On an existing chord, a single key replaces the note in
     the column the cursor is on.
-  - `ctrl` + arrows move the note under the cursor: `,` `/` down / up a semitone, `;` `.` up / down an octave (off the note columns: the whole step). You hear the note(s) as they are now, and the same when `f`/`l` change a note.
+  - `ctrl` + arrows move the note under the cursor: `,` `/` down / up a semitone, `;` `.` up / down an octave (off the note columns: the whole step). You hear the note(s) as they will play: with the step's velocity, for its length at the song's tempo (up to 4 s; a moment on a track whose notes ring until the next one). The same when `f`/`l` change a note.
   - `f`/`l` turn the value under the cursor down / up: note ±1 semitone, velocity ±1,
     length through ¼ ½ 1 2 3… steps, offset ±1 tick. Hold `shift` for bigger jumps
     (octave, ±16 velocity, ±1 bar of length).

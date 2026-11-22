@@ -44,7 +44,10 @@ bool arpActive();
 uint8_t arpPool(uint8_t* out);
 // Sound some notes on a track for a moment (hearing an edit). A new preview cuts the last one.
 // previewTick() (from the app loop) ends them. Call both with the engine lock held.
-void preview(uint8_t track, const uint8_t* notes, uint8_t n, uint16_t ms = 350);
+void preview(uint8_t track, const uint8_t* notes, uint8_t n, uint16_t ms = 350, uint8_t vel = 0);
+// The way a step plays in the song: its velocity, for its length at the song's tempo (a moment on a
+// track in hold mode, where notes ring until the next one).
+void previewStep(uint8_t track, const uint8_t* notes, uint8_t n, uint16_t lenTicks, uint8_t vel);
 void previewTick();
 void arpClear();
 // Chord bank (top rows in TOP_BANK): the root picked, and the slash-bass mode
