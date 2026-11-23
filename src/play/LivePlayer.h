@@ -57,6 +57,8 @@ uint8_t bankBass();
 void bankReset();
 // Text describing the most recent thing played, e.g. "Cmaj7", "E4", "Snare".
 const char* lastPlayed();
+// millis() when a key last played something (the status line shows it for a moment on every screen)
+uint32_t lastPlayedAt();
 // Pitch of a piano key in the current octave/key/mode, or -1 if inactive.
 int pianoNoteFor(uint8_t semitoneValue);
 // True if the given key index is currently sounding something.

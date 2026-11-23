@@ -496,12 +496,31 @@ static void drawToast() {
 static bool menuDrawn = false;
 static bool menuVisible() { return menuHeld && millis() - menuSince >= MENU_SHOW_DELAY_MS; }
 
+// What was just played, for a moment, on every screen (the Live screen shows it big already).
+static constexpr uint32_t PLAYED_MS = 1500;
+static bool playedShown = false;
+static void drawPlayed() {
+  const uint32_t at = player::lastPlayedAt();
+  playedShown = at && millis() - at < PLAYED_MS && current != liveScreen() && player::lastPlayed()[0];
+  if (!playedShown) return;
+  canvas.setFont(&fonts::Font0);
+  const char* t = player::lastPlayed();
+  const int tw = canvas.textWidth(t) + 10;
+  const int x = W - tw - 2, y = STATUS_H + 2;
+  canvas.fillRoundRect(x, y, tw, 13, 3, col::BAR);
+  canvas.drawRoundRect(x, y, tw, 13, 3, col::HELD);
+  canvas.setTextColor(col::HELD);
+  canvas.setTextDatum(middle_center);
+  canvas.drawString(t, x + tw / 2, y + 7);
+}
+
 static void render() {
   {
     seq::Lock l;  // the screens read the song while drawing
     canvas.fillScreen(col::BG);
     current->draw(canvas);
     drawStatusBar();
+    drawPlayed();
   }
   menuDrawn = menuVisible();
   if (menuDrawn) drawMenu();
@@ -646,6 +665,8 @@ void tick() {
   }
   // Menu overlay appears after a short delay; toast disappears on its own.
   if (menuVisible() != menuDrawn) dirty = true;
+  if (playedShown && now - player::lastPlayedAt() >= PLAYED_MS) dirty = true;   // take the played note away
+  if (!playedShown && player::lastPlayedAt() && now - player::lastPlayedAt() < PLAYED_MS && current != liveScreen()) dirty = true;
   if (toastUntil && now >= toastUntil) {
     toastUntil = 0;
     dirty = true;

@@ -36,7 +36,9 @@ static uint8_t refs[16][128];
 static uint8_t inv = 0;
 static uint8_t bankRootPc = 0;
 static uint8_t bankBassMode = 0;
-static char last[16] = "";
+static char last[24] = "";
+static uint32_t lastAt = 0;      // when a key last played something (or picked a root / bass note)
+static uint8_t bankLastQual = 0; // the chord bank's last chord type, to name a slash chord
 
 // General MIDI drum notes for the 12 pads.
 static const uint8_t DRUM_NOTES[12] = {36, 38, 37, 39, 42, 46, 41, 45, 48, 49, 51, 56};
@@ -71,6 +73,7 @@ uint8_t bankRoot() { return bankRootPc; }
 uint8_t bankBass() { return bankBassMode; }
 void bankReset() { bankRootPc = settings.root % 12; bankBassMode = 0; }
 const char* lastPlayed() { return last; }
+uint32_t lastPlayedAt() { return lastAt; }
 bool keySounding(uint8_t k) { return k < layout::KEY_COUNT && held[k].channel != 0; }
 
 static void startNote(uint8_t track, uint8_t ch, uint8_t note, bool drum, uint8_t pad, uint8_t vel = 0) {
@@ -220,6 +223,7 @@ static void press(uint8_t k, const layout::KeyDef& def) {
       if (arpOn) { h.arp = true; liveArp.press((uint8_t)n); }   // the arp plays it
       else startNote(h.track, h.channel, (uint8_t)n, false, 0);
       theory::formatNote((uint8_t)n, last);
+      lastAt = millis();
       break;
     }
     case Role::Chord: {
@@ -244,6 +248,7 @@ static void press(uint8_t k, const layout::KeyDef& def) {
         else startNote(h.track, h.channel, c.notes[i], false, 0);
       }
       snprintf(last, sizeof(last), "%s", c.name);
+      lastAt = millis();
       break;
     }
     case Role::BankQual: {
@@ -256,6 +261,7 @@ static void press(uint8_t k, const layout::KeyDef& def) {
       mods.flats = theory::keyUsesFlats(settings.root, settings.scale);
       int base = 12 * settings.octave + bankRootPc;  // chords sit an octave below the piano
       if (base < 0) base += 12;
+      bankLastQual = def.value;
       theory::Chord c = theory::buildBankChord(bankRootPc, def.value, (uint8_t)base, mods);
       if (!c.count) return;
       h.channel = seq::song.tracks[synthTrack].channel;
@@ -268,6 +274,7 @@ static void press(uint8_t k, const layout::KeyDef& def) {
         else startNote(h.track, h.channel, c.notes[i], false, 0);
       }
       snprintf(last, sizeof(last), "%s", c.name);
+      lastAt = millis();
       break;
     }
     case Role::Drum: {
@@ -277,6 +284,7 @@ static void press(uint8_t k, const layout::KeyDef& def) {
       h = {ch, drumTrack, 1, {DRUM_NOTES[pad]}, true, note};
       startNote(h.track, h.channel, note, true, pad);
       snprintf(last, sizeof(last), "%s", DRUM_NAMES[pad]);
+      lastAt = millis();
       break;
     }
     default:
@@ -324,6 +332,7 @@ bool onKey(uint8_t k, bool pressed, Played* out) {
         bankRootPc = def.value % 12;
         snprintf(last, sizeof(last), "root %s", theory::keyUsesFlats(settings.root, settings.scale)
                                                     ? theory::noteNameFlat(bankRootPc) : theory::noteName(bankRootPc));
+        lastAt = millis();
       }
       return true;
     case Role::Piano:
@@ -351,8 +360,18 @@ bool onKey(uint8_t k, bool pressed, Played* out) {
       if (def.value == layout::ACT_INVERSION) {
         if (layout::topMode() == layout::TOP_BANK) {
           bankBassMode = (bankBassMode + 1) % 4;
-          static const char* const B[4] = {"no bass note", "bass: 3rd", "bass: 5th", "bass: 7th"};
-          snprintf(last, sizeof(last), "%s", B[bankBassMode]);
+          if (!bankBassMode) {
+            snprintf(last, sizeof(last), "no bass note");
+          } else {
+            // name the note it adds, on the chord you would play: "bass C# A/C#"
+            theory::BankMods m;
+            m.bass = bankBassMode;
+            m.flats = theory::keyUsesFlats(settings.root, settings.scale);
+            const theory::Chord c = theory::buildBankChord(bankRootPc, bankLastQual, (uint8_t)(48 + bankRootPc), m);
+            const uint8_t bassPc = c.count ? c.notes[0] % 12 : 0;
+            snprintf(last, sizeof(last), "bass %s %s", m.flats ? theory::noteNameFlat(bassPc) : theory::noteName(bassPc), c.name);
+          }
+          lastAt = millis();
           return true;
         }
         inv = (inv + 1) % 3;
